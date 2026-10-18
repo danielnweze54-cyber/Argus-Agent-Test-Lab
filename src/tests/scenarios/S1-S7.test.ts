@@ -1,3 +1,4 @@
+
 import { describe, it, expect } from 'vitest';
 import { RunOrchestrator } from '../../core/RunOrchestrator';
 import { MockTargetAdapter } from '../../adapters/MockTargetAdapter';
@@ -46,40 +47,48 @@ describe('Canonical Scenarios S1-S7', () => {
       // A single shared controller cannot serve both client-1 and
       // resource-server-1 — setParticipantId/connect are per-controller state.
       const controllers = new Map<string, AgentController>();
+
       for (const p of def.participants) {
         if (p.ownership !== 'ARGUS') continue;
+
         const c = new AgentController(new MockTargetAdapter('mock'), {
           connectionConfig: { transportType: 'mock' },
           runId: `run_${Date.now()}`,
         });
+
         c.setParticipantId(p.participantId);
         controllers.set(p.participantId, c);
       }
-      // If no ARGUS participants, just use a default key
+
+      // If no ARGUS participants, just use a default key.
       if (controllers.size === 0) {
-        controllers.set('default', new AgentController(new MockTargetAdapter('mock'), {
-          connectionConfig: { transportType: 'mock' },
-          runId: `run_${Date.now()}`,
-        }));
+        controllers.set(
+          'default',
+          new AgentController(new MockTargetAdapter('mock'), {
+            connectionConfig: { transportType: 'mock' },
+            runId: `run_${Date.now()}`,
+          })
+        );
       }
 
       const assertions = def.assertions || [];
-
       const orchestrator = new RunOrchestrator(def, controllers, assertions);
 
-      // R3 close-out: S4 runs here via the finite harness override (finiteS4,
-      // duration_ms: 10) so the shared loop terminates deterministically.
-      // The canonical S4_SellerTimeout.ts keeps duration_ms: -1 — its full
-      // semantics (infinite hang + stuck-race proof) are covered in
-      // S2-S4-SellerAction.test.ts. No timeout-hacker, no scenario change.
+      // S4 uses the finite harness override (duration_ms: 10) so the
+      // shared loop terminates deterministically. The canonical
+      // S4_SellerTimeout.ts keeps duration_ms: -1. Its full semantics
+      // are covered in S2-S4-SellerAction.test.ts.
 
       const result = await orchestrator.run();
 
       expect(result.scenarioId).toBe(id);
       expect(result.evidenceCount).toBeGreaterThan(0);
       expect(result.verdict).toBeDefined();
+
       if (result.verdict) {
-        expect(['PASS', 'FAIL', 'INCONCLUSIVE']).toContain(result.verdict.status);
+        expect(['PASS', 'FAIL', 'INCONCLUSIVE']).toContain(
+          result.verdict.status
+        );
       }
     });
   });
@@ -88,32 +97,39 @@ describe('Canonical Scenarios S1-S7', () => {
     const targetAdapter = new MockTargetAdapter('mock');
     const controller = new AgentController(targetAdapter, {
       connectionConfig: { transportType: 'mock' },
-      runId: `run_${Date.now()}`
+      runId: `run_${Date.now()}`,
     });
 
     const controllers = new Map<string, AgentController>();
+
     for (const p of S1_DuplicateRequest.participants) {
       if (p.ownership === 'ARGUS') {
         controllers.set(p.participantId, controller);
       }
     }
+
     if (controllers.size === 0) {
       controllers.set('default', controller);
     }
 
     const assertions = S1_DuplicateRequest.assertions || [];
+    const orchestrator = new RunOrchestrator(
+      S1_DuplicateRequest,
+      controllers,
+      assertions
+    );
 
-    const orchestrator = new RunOrchestrator(S1_DuplicateRequest, controllers, assertions);
     const result = await orchestrator.run();
 
-    // S1 ожидает PASS, так как идемпотентность работает корректно
-    if (result.verdict) {
-      expect(result.verdict.status).toBe('PASS');
-    }
+    // S1 must produce evidence and a PASS verdict.
+    expect(result.evidenceCount).toBeGreaterThan(0);
+    expect(result.verdict).toBeDefined();
+    expect(result.verdict?.status).toBe('PASS');
   });
 
   it('S2 - should pass validation (ARGUS-owned participants are valid sources)', () => {
     const result = validateScenario(S2_PaymentBeforeExecution);
+
     expect(result.valid).toBe(true);
     expect(result.errors.length).toBe(0);
   });
@@ -122,25 +138,31 @@ describe('Canonical Scenarios S1-S7', () => {
     const targetAdapter = new MockTargetAdapter('mock');
     const controller = new AgentController(targetAdapter, {
       connectionConfig: { transportType: 'mock' },
-      runId: `run_${Date.now()}`
+      runId: `run_${Date.now()}`,
     });
 
     const controllers = new Map<string, AgentController>();
+
     for (const p of S6_PaymentRetry.participants) {
       if (p.ownership === 'ARGUS') {
         controllers.set(p.participantId, controller);
       }
     }
+
     if (controllers.size === 0) {
       controllers.set('default', controller);
     }
 
     const assertions = S6_PaymentRetry.assertions || [];
+    const orchestrator = new RunOrchestrator(
+      S6_PaymentRetry,
+      controllers,
+      assertions
+    );
 
-    const orchestrator = new RunOrchestrator(S6_PaymentRetry, controllers, assertions);
     const result = await orchestrator.run();
 
-    // S6 сейчас INCONCLUSIVE (scaffolding, Variant A)
+    // S6 is currently INCONCLUSIVE (scaffolding, Variant A).
     if (result.verdict) {
       expect(result.verdict.status).toBe('INCONCLUSIVE');
     }

@@ -144,3 +144,24 @@ Argus is in active engineering development. Public case studies and production-c
 
 **Argus Agent Test Lab — AI Agent Testing & Reliability.**
 
+## Local smoke test
+
+Run the local S1 smoke test before external pilot testing:
+
+```bash
+npm run smoke:local
+```
+
+The command uses the existing S1 scenario with the mock target. It requires no wallet, private key, RPC endpoint, or target endpoint configuration.
+
+A successful run must report:
+- Scenario: `S1`
+- Status: `COMPLETED`
+- Evidence count greater than zero
+- Verdict: `PASS`
+- Exit code: `0`
+
+If execution fails or any expected result is missing, the smoke test exits with a non-zero code.
+
+This checks the local mock execution path; it does not prove that every part of Argus is network-isolated. Do not use it as a substitute for external pilot testing.
+
