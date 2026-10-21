@@ -82,6 +82,8 @@ export interface BsSessionRecord {
   readonly corruptTransportServed?: boolean;
   /** S-BS-13: ресурс отдан бесплатно (200 без 402). */
   readonly freeResourceServed?: boolean;
+  /** Пробы S-BS-06 (follow-up #3866): суммы requirements, отданные на каждый 402-контакт. */
+  readonly requirementsServed?: readonly string[];
   readonly error?: string;
 }
 

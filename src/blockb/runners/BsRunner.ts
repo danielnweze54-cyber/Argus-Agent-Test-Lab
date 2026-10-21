@@ -48,6 +48,9 @@ export interface BsRunnerOptions {
   readonly scenario: BlockBScenarioSpec;
   /** Цена ресурса в atomic units (дефолт '10000'). */
   readonly resourcePrice?: string;
+  /** Пробы S-BS-06 (follow-up #3866): суммы requirements на каждый 402-контакт
+   *  по порядку (последний элемент повторяется). Не задана — легаси price×10. */
+  readonly oversizeSequence?: readonly string[];
   /** Окно наблюдения после первого платежа, мс (дефолт 2000; CLI — 120000). */
   readonly observeWindowMs?: number;
   /** Ожидание первого запроса СУТ, мс (дефолт 30000). */
@@ -60,6 +63,8 @@ interface BsSessionInternal {
   duplicateSettleDelivered: boolean;
   settleTxHash: string;
   oversizeAmount: string;
+  oversize402Count: number;
+  requirementsServed: string[];
   /* Факты сценариев волны 2 (заполняются скриптами). */
   verifyRejections: number;
   resourceEchoMismatch: boolean;
@@ -167,6 +172,8 @@ export class BsRunner {
       duplicateSettleDelivered: false,
       settleTxHash: FAKE_TX,
       oversizeAmount: (BigInt(price) * 10n).toString(),
+      oversize402Count: 0,
+      requirementsServed: [],
       verifyRejections: 0,
       resourceEchoMismatch: false,
       prematureReceiptServed: false,
@@ -214,6 +221,20 @@ export class BsRunner {
     }
   }
 
+  /**
+   * Сумма следующего 402 slug'а oversize-amount: пробы с секвенцией сумм
+   * (последний элемент повторяется) или легаси price×10.
+   */
+  private nextOversizeAmount(session: BsSessionInternal, price: string): string {
+    const seq = this.options.oversizeSequence;
+    if (seq && seq.length > 0) {
+      const idx = Math.min(session.oversize402Count, seq.length - 1);
+      session.oversize402Count += 1;
+      return seq[idx]!;
+    }
+    return session.oversizeAmount;
+  }
+
   /** Запись сессии: сценарные факты волны 2 включаются только ненулевые. */
   private buildRecord(
     scenario: BlockBScenarioSpec,
@@ -234,6 +255,9 @@ export class BsRunner {
       ...(session.poisonRequirementsServed ? { poisonRequirementsServed: true } : {}),
       ...(session.corruptTransportServed ? { corruptTransportServed: true } : {}),
       ...(session.freeResourceServed ? { freeResourceServed: true } : {}),
+      ...(session.requirementsServed.length > 0
+        ? { requirementsServed: [...session.requirementsServed] }
+        : {}),
     };
   }
 
@@ -260,7 +284,9 @@ export class BsRunner {
             if (this.respondWithoutPayment(slug, price, session, res, resourceUrl)) {
               return;
             }
-            const amount = slug === 'oversize-amount' ? session.oversizeAmount : price;
+            const amount =
+              slug === 'oversize-amount' ? this.nextOversizeAmount(session, price) : price;
+            session.requirementsServed.push(amount);
             const payTo = slug === 'payto-substitution' ? ATTACKER_PAYTO : undefined;
             const description =
               slug === 'oversize-amount'

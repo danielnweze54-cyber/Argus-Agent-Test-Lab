@@ -74,6 +74,9 @@ interface BlockBFlags {
   rpcUrl?: string;
   /** Минимальный баланс в atomic units (дефолт 100000 = 0.1 USDC). */
   fundingMinAtomic?: string;
+  /** Пробы S-BS-06 (follow-up #3866): суммы requirements на каждый 402-контакт,
+   *  через запятую ('10000,100000'; последний повторяется). BS-семейство. */
+  requirementAmounts?: string;
 }
 
 const USAGE = [
@@ -85,6 +88,7 @@ const USAGE = [
   'Flags: --json, --price ATOMIC_UNITS (BS), --skip-gate, --request-timeout-ms, --first-request-timeout-ms',
   '       --facilitator-settle-url URL (S-BC-14 frontrun-drain: settle фасилитатора СУТ)',
   '       --funding auto|manual --faucet-url URL --rpc-url URL [--funding-min-atomic N] (BC, решение В3)',
+  '       --requirement-amounts A1,A2 (BS S-BS-06 probes: sums per 402 contact; env ARGUS_B_REQUIREMENT_AMOUNTS)',
   'Env:   ARGUS_B_SUT_URL, ARGUS_B_BIND, ARGUS_TEST_WALLET_PRIVATE_KEY,',
   '       ARGUS_B_FACILITATOR_SETTLE_URL, ARGUS_B_FUNDING, ARGUS_B_FAUCET_URL, ARGUS_B_RPC_URL',
 ].join('\n');
@@ -159,11 +163,35 @@ export function parseBlockBArgs(argv: string[]): BlockBFlags {
       case '--funding-min-atomic':
         flags.fundingMinAtomic = next();
         break;
+      case '--requirement-amounts':
+        flags.requirementAmounts = next();
+        break;
       default:
         throw new Error(`Unknown flag '${flag}'\n${USAGE}`);
     }
   }
   return flags;
+}
+
+/**
+ * Список сумм для проб S-BS-06 (follow-up #3866): '10000,100000' →
+ * ['10000','100000'] (последний элемент повторяется на последующих 402).
+ */
+export function parseAmountsList(raw: string | undefined): readonly string[] | undefined {
+  if (!raw) return undefined;
+  const parts = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (parts.length === 0) return undefined;
+  for (const p of parts) {
+    if (!/^\d+$/.test(p) || BigInt(p) <= 0n) {
+      throw new Error(
+        `--requirement-amounts: ожидались положительные atomic-суммы через запятую, получено '${raw}'`
+      );
+    }
+  }
+  return parts;
 }
 
 /** Подписант честного/плохого клиента на ключе оператора (viem). */
@@ -570,6 +598,9 @@ async function runBsScenario(
       runConfig: { ...config, family: 'BS' } as BlockBRunConfig & { family: 'BS' },
       scenario: spec,
       resourcePrice: flags.price,
+      oversizeSequence: parseAmountsList(
+        flags.requirementAmounts ?? process.env.ARGUS_B_REQUIREMENT_AMOUNTS
+      ),
       observeWindowMs: flags.observeWindowMs,
       firstRequestTimeoutMs: flags.firstRequestTimeoutMs,
     });

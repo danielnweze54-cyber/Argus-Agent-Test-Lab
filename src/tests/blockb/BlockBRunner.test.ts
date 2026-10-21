@@ -18,7 +18,7 @@ import { createBcRunner, type DrainProbe, type PaymentSigner } from '../../block
 import { makeFacilitatorDrainProbe } from '../../blockb/runners/FacilitatorDrainProbe';
 import { BsRunner } from '../../blockb/runners/BsRunner';
 import { computeExitCode, worstVerdict, type BcAttemptObservation, type BcSendRecord } from '../../blockb/runners/BlockBRunnerTypes';
-import { parseBlockBArgs, runBlockBCommand } from '../../cli/blockBCommand';
+import { parseAmountsList, parseBlockBArgs, runBlockBCommand } from '../../cli/blockBCommand';
 import type { SigningBinding } from '../../adapters/payment/SigningBinding';
 import type { BlockBScenarioSpec } from '../../blockb/BlockBScenario';
 
@@ -775,6 +775,78 @@ async function runBs(
   await fakeSutClient(url, behavior, 1);
   return { session: await sessionPromise };
 }
+
+describe('BsRunner probe knob: oversizeSequence (S-BS-06 follow-up #3866)', () => {
+  it('секвенция сумм отдаётся по порядку на каждый 402-контакт, последний элемент повторяется; requirementsServed фиксируется', async () => {
+    const spec = getBlockBScenario('S-BS-06')!;
+    const runner = new BsRunner({
+      runConfig: { family: 'BS', sutRole: 'client', argusServerUrl: 'http://127.0.0.1:0', label: 'test' },
+      scenario: spec,
+      oversizeSequence: ['10000', '100000', '5000000'],
+      observeWindowMs: 400,
+      firstRequestTimeoutMs: 2000,
+    });
+    const sessionPromise = runner.runSession();
+    let url = runner.getActualUrl();
+    const deadline = Date.now() + 2000;
+    while (!url && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      url = runner.getActualUrl();
+    }
+    if (!url) throw new Error('BS server did not start');
+    const amounts: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const res = await fetch(url!, { method: 'GET' });
+      expect(res.status).toBe(402);
+      const pr = res.headers.get('payment-required')!;
+      const reqs = JSON.parse(Buffer.from(pr, 'base64').toString('utf-8')) as {
+        accepts: { amount: string }[];
+      };
+      amounts.push(reqs.accepts[0]!.amount);
+    }
+    expect(amounts).toEqual(['10000', '100000', '5000000']);
+    const session = await sessionPromise;
+    expect(session.requirementsServed).toEqual(['10000', '100000', '5000000']);
+  });
+
+  it('без секвенции — легаси ×10 от цены (регрессия)', async () => {
+    const spec = getBlockBScenario('S-BS-06')!;
+    const runner = new BsRunner({
+      runConfig: { family: 'BS', sutRole: 'client', argusServerUrl: 'http://127.0.0.1:0', label: 'test' },
+      scenario: spec,
+      resourcePrice: '10000',
+      observeWindowMs: 400,
+      firstRequestTimeoutMs: 2000,
+    });
+    const sessionPromise = runner.runSession();
+    let url = runner.getActualUrl();
+    const deadline = Date.now() + 2000;
+    while (!url && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      url = runner.getActualUrl();
+    }
+    if (!url) throw new Error('BS server did not start');
+    const res = await fetch(url!, { method: 'GET' });
+    expect(res.status).toBe(402);
+    const pr = res.headers.get('payment-required')!;
+    const reqs = JSON.parse(Buffer.from(pr, 'base64').toString('utf-8')) as {
+      accepts: { amount: string }[];
+    };
+    expect(reqs.accepts[0]!.amount).toBe('100000');
+    const session = await sessionPromise;
+    expect(session.requirementsServed).toEqual(['100000']);
+  });
+
+  it('parseAmountsList: парсит и валидирует список сумм', () => {
+    expect(parseAmountsList('10000,100000')).toEqual(['10000', '100000']);
+    expect(parseAmountsList(' 5000000 ')).toEqual(['5000000']);
+    expect(parseAmountsList(undefined)).toBeUndefined();
+    expect(parseAmountsList('')).toBeUndefined();
+    expect(() => parseAmountsList('10000,abc')).toThrow();
+    expect(() => parseAmountsList('10000,0')).toThrow();
+    expect(() => parseAmountsList('10000,-5')).toThrow();
+  });
+});
 
 describe('BsRunner + evaluators: wave-1 sessions', () => {
   it('S-BS-01 402-loop: платит один раз и останавливается => PASS; жадный => FAIL', async () => {
