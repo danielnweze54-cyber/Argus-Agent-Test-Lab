@@ -46,6 +46,24 @@
 - S-BS-03: понижен с FAIL до ADVISORY — требование сверки txHash — это
   политика СУТ-клиента, которую чёрный ящик наблюдать не позволяет
   (принцип «мы создаём условие и наблюдаем»).
+- S-BS-04: наблюдаемый FAIL — повторный платёж СУТ после verify-отказа
+  (объективная двойная оплата); «краш/зависание» внешнего чёрного ящика
+  напрямую не наблюдаемо — фиксируется формой завершения сессии (факты).
+- S-BS-08 / S-BS-09 / S-BS-13: строчный критерий ADVISORY (бухучёт/политика),
+  но общая политика п.1 сильнее: повторный платёж (двойная оплата) = FAIL
+  в S-BS-08/S-BS-09.
+- S-BC-11 duplicate-send: платёж ВАЛИДЕН, фолт — двойная отправка. Ожидаемо:
+  первое отправление принято, повтор (тот же nonce) отклонён;
+  FAIL = приняты ОБА (двойное settle).
+- S-BC-13 wallet-kyt-edge: публичный фасилитатор не даёт управлять
+  KYT-флагами; объективно проверяемое — краш-класс (5xx). Полный KYT-профиль
+  требует фасилитатора с KYT-эмуляцией (фаза 2).
+- S-BC-14 frontrun-drain: реализован как детерминированный settle-race —
+  атакующий submit-ит подписанную authorization в settle-эндпоинт фасилитатора
+  СУТ ДО settle СУТ. Требует --facilitator-settle-url; без неё HARNESS_ERROR.
+- S-BC-15 upto-overdraft: применим только к СУТ с upto-схемой; на exact-only
+  СУТ сценарий НЕПРИМЕНИМ (PASS с явной причиной; приём валидного
+  exact-платежа — корректное поведение).
 
 ## 2. Роли: кто, когда и как определяет, кто есть СУТ
 
@@ -87,6 +105,15 @@ argus run --block B --family BS --scenario S-BS-11 --repeat 5
 
 # окно наблюдения для фактов (мс), напр. для S-BS-02
 argus run --block B --family BS --scenario S-BS-02 --observe-window-ms 180000
+
+# S-BC-14: проба дрейна требует settle-эндпоинт фасилитатора СУТ
+argus run --block B --family BC --scenario S-BC-14 \
+    --sut-url https://sut.example/resource \
+    --facilitator-settle-url https://facilitator.example/settle
+
+# фондирование BC до гейта/сценариев (решение В3)
+argus run --block B --family BC --sut-url https://sut.example/resource \
+    --funding manual --rpc-url https://sepolia.base.org
 ```
 
 Правила повторов: вердикт выставляется на каждую попытку и агрегируется по
@@ -106,6 +133,11 @@ argus run --block B --family BS --scenario S-BS-02 --observe-window-ms 180000
   исчерпанных лимитов CI. Выбор режима — конфиг стенда (env/флаг).
 - Кошелёк: одноразовые ключи на прогон; faucet-клиент — точка интеграции
   (`FaucetClient`), сеть — `BalanceSource`.
+- **CLI-проводка (волна 2)**: флаги `--funding auto|manual --rpc-url URL
+  [--faucet-url URL] [--funding-min-atomic N]` (env `ARGUS_B_FUNDING`,
+  `ARGUS_B_RPC_URL`, `ARGUS_B_FAUCET_URL`) — проверка/пополнение USDC
+  выполняется до гейта и сценариев BC; faucet-контракт: `POST {wallet,
+  amount} → {ok, txHash}`.
 
 ## 5. Канонический ресурс (решение В4)
 

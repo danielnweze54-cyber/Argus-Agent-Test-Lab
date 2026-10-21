@@ -81,11 +81,31 @@ Refinements versus the historical docx v1 matrix (aligned with the runner):
   double payment).
 - **S-BS-03**: downgraded from FAIL to ADVISORY — demanding tx-hash
   verification is SUT client policy, invisible to a black-box observer.
+- **S-BS-04**: the observable FAIL is a repeated payment after a verify
+  rejection (objective double payment); "crash/hang" of an external
+  black-box client is not directly observable — recorded as session
+  termination shape (facts).
+- **S-BS-08 / S-BS-09 / S-BS-13**: the per-row criterion is ADVISORY
+  (bookkeeping/policy), but the generic policy of §1 still applies: a
+  second payment (objective double payment) is FAIL in S-BS-08/S-BS-09.
+- **S-BC-11 duplicate-send**: the payment is VALID; the fault is the
+  double send. Expected: first send accepted, replay (same nonce)
+  rejected. FAIL = both sends accepted (double settle).
+- **S-BC-13 wallet-kyt-edge**: a public facilitator does not expose KYT
+  flag control; the objectively checkable failure is the crash class
+  (5xx). Full KYT profiles need a KYT-emulating facilitator (phase 2).
+- **S-BC-14 frontrun-drain**: implemented as a deterministic settle-race
+  (attacker submits the signed authorization to the SUT's facilitator
+  settle endpoint BEFORE the SUT settles). Requires
+  `--facilitator-settle-url`; without it the run is HARNESS_ERROR.
+- **S-BC-15 upto-overdraft**: applies only to SUTs advertising the `upto`
+  scheme; on exact-only SUTs the scenario is NOT APPLICABLE (PASS with an
+  explicit reason; accepting a valid exact payment is correct behavior).
 
 ## 3. CLI
 
 ```bash
-# list all registered scenarios (wave 1 in code; full registry: docs)
+# list all registered scenarios (all 28 in code: wave 1 × 10 + wave 2 × 18)
 argus list --block B
 
 # role gates (mandatory before a family run)
@@ -98,6 +118,15 @@ argus run --block B --family BC --sut-url https://sut.example/resource
 # ONE specific scenario, N repetitions
 argus run --block B --family BS --scenario S-BS-11 --repeat 5 \
     --bind 127.0.0.1:3461 --observe-window-ms 180000
+
+# S-BC-14 needs the SUT's facilitator settle endpoint (settle-race probe)
+argus run --block B --family BC --scenario S-BC-14 \
+    --sut-url https://sut.example/resource \
+    --facilitator-settle-url https://facilitator.example/settle
+
+# funding before a BC run/gate (decision V3)
+argus run --block B --family BC --sut-url https://sut.example/resource \
+    --funding manual --rpc-url https://sepolia.base.org
 ```
 
 Flags and environment:
@@ -111,6 +140,11 @@ Flags and environment:
 | `--sut-url URL` / `ARGUS_B_SUT_URL` | BC: the SUT resource-server URL |
 | `--bind HOST:PORT` / `ARGUS_B_BIND` | BS: where Argus hosts the bad server |
 | `ARGUS_TEST_WALLET_PRIVATE_KEY` | BC: one-shot key of the bad client (viem-based signer) |
+| `--facilitator-settle-url URL` / `ARGUS_B_FACILITATOR_SETTLE_URL` | S-BC-14: the SUT facilitator settle endpoint (settle-race drain probe; without it the scenario is HARNESS_ERROR) |
+| `--funding auto\|manual` / `ARGUS_B_FUNDING` | BC: funding mode (V3) — auto = faucet + manual fallback, manual = balance check only |
+| `--faucet-url URL` / `ARGUS_B_FAUCET_URL` | faucet endpoint accepting `POST {wallet, amount} → {ok, txHash}` |
+| `--rpc-url URL` / `ARGUS_B_RPC_URL` | RPC endpoint for the USDC `balanceOf` check (required with `--funding`) |
+| `--funding-min-atomic N` | minimum balance in atomic units (default 100000 = 0.1 USDC) |
 | `--price`, `--json`, `--skip-gate`, `--request-timeout-ms` | misc: BS resource price (atomic units), machine-readable report, gate skip, HTTP timeout |
 
 Exit codes: `0` / `1` / `2` as per the verdict policy.
@@ -203,10 +237,13 @@ state. Retry thresholds are **never** verdicts.
   06, 11. All phase 1; no mempool or `upto` dependencies. **Implemented**
   in `src/blockb/BlockBRegistry.ts` with runners in `src/blockb/runners/`.
 - **Wave 2 (18 scenarios)** — the rest of the registry, including the
-  decoupled phase-2 scenarios (S-BC-14, S-BC-15).
+  decoupled phase-2 scenarios (S-BC-14, S-BC-15). **Implemented** in
+  `BLOCK_B_WAVE2_SCENARIOS` (same registry module); S-BC-14 requires the
+  `--facilitator-settle-url` settle-race probe, S-BC-15 applies only to
+  `upto`-capable SUTs (otherwise PASS "not applicable").
 
 Waves define the implementation order, not a reduced scope: full coverage
-is 28 scenarios.
+is 28 scenarios — all 28 are registered and executable in code.
 
 ## 9. Payment layer requirements (summary)
 
