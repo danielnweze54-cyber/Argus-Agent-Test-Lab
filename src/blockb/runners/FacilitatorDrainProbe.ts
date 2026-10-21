@@ -52,11 +52,13 @@ export function makeFacilitatorDrainProbe(
         const parsed = JSON.parse(text) as {
           success?: boolean;
           error?: string;
+          errorReason?: string;
           invalidReason?: string;
           transaction?: string;
         };
         settled = res.status === 200 && (parsed.success === true || !!parsed.transaction);
-        reason = parsed.error ?? parsed.invalidReason;
+        // x402.org фасилитатор отвечает полем errorReason; другие — error/invalidReason.
+        reason = parsed.errorReason ?? parsed.error ?? parsed.invalidReason;
       } catch {
         reason = text.slice(0, 200);
       }

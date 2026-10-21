@@ -609,7 +609,8 @@ describe('S-BC-14: проба дрейна шлёт корректный кон�
     let captured: { body?: { x402Version?: number; paymentPayload?: unknown; paymentRequirements?: Record<string, unknown> } } = {};
     const fetchImpl: typeof fetch = async (_url, init) => {
       captured = { body: JSON.parse(String(init?.body ?? '{}')) };
-      return new Response(JSON.stringify({ success: false, error: 'insufficient_funds' }), { status: 400 });
+      // Формат ответа x402.org фасилитатора: поле errorReason (не error).
+      return new Response(JSON.stringify({ success: false, errorReason: 'invalid_exact_evm_signature' }), { status: 200 });
     };
     const probe = makeFacilitatorDrainProbe('https://facil.example/settle', fetchImpl);
     const payload = Buffer.from(JSON.stringify({ x402Version: 2, payload: { signature: '0xabc' } })).toString('base64');
@@ -621,7 +622,7 @@ describe('S-BC-14: проба дрейна шлёт корректный кон�
     expect(body.paymentRequirements?.payTo).toBe(PAY_TO);
     expect(typeof body.paymentPayload).toBe('object'); // раскодированный объект, не Base64-строка
     expect(result.settled).toBe(false);
-    expect(result.reason).toBe('insufficient_funds');
+    expect(result.reason).toBe('invalid_exact_evm_signature');
   });
 });
 
