@@ -26,7 +26,7 @@ import {
   type SettlementObservation,
 } from '../PaymentFaultInjector';
 import { defaultSigningIntentSource, type SigningBinding, type SigningIntentSource } from '../../adapters/payment/SigningBinding';
-import type { BcAttemptObservation, BcSendRecord } from './BlockBRunnerTypes';
+import type { BcAttemptObservation, BcSendRecord, DrainProbeResult } from './BlockBRunnerTypes';
 
 /** Подписант плохого клиента: binding → Base64 JSON PaymentPayload. */
 export type PaymentSigner = (binding: SigningBinding) => Promise<string>;
@@ -41,7 +41,17 @@ export interface BcRunnerOptions {
   /** Таймаут одной HTTP-отправки, мс (дефолт 15000). */
   readonly requestTimeoutMs?: number;
   readonly fetchImpl?: typeof fetch;
+  /**
+   * S-BC-14 (frontrun-drain): проба дрейна — атакующий submit-ит подписанную
+   * authorization напрямую в фасилитатор ДО settle СУТ. Конфигурируется
+   * оператором (URL settle фасилитатора); без неё сценарий даёт
+   * HARNESS_ERROR с читаемой причиной.
+   */
+  readonly drainProbe?: DrainProbe;
 }
+
+/** Проба дрейна: payload (Base64 JSON) + requirements из 402 → факт дрейна. */
+export type DrainProbe = (payload: string, reqs: X402PaymentRequiredBody) => Promise<DrainProbeResult>;
 
 interface ResourceResponse {
   status: number;
@@ -131,6 +141,7 @@ export class BcRunner {
     const sends: BcSendRecord[] = [];
     let resourceIssued = false;
     let settleAccepted = false;
+    let drain: DrainProbeResult | undefined;
 
     const ctx = (family: 'BC'): HookCtx => ({
       scenarioId: injector.scenarioId,
@@ -213,6 +224,24 @@ export class BcRunner {
       }
       const finalPayload = payloadResolved.value;
 
+      // Шаг 4.5 (S-BC-14): дрейн authorization ДО settle СУТ. Без пробы —
+      // HARNESS_ERROR с читаемой причиной (сценарий отцепляемый).
+      if (this.options.scenario.bcPlan?.drainBeforeSend) {
+        if (!this.options.drainProbe) {
+          return {
+            attempt,
+            sends: [],
+            resourceIssued,
+            settleAccepted,
+            facts: injector.getFacts(),
+            error:
+              'S-BC-14 требует пробу дрейна: передайте --facilitator-settle-url ' +
+              '(env ARGUS_B_FACILITATOR_SETTLE_URL) — URL settle-эндпоинта фасилитатора СУТ',
+          };
+        }
+        drain = await this.options.drainProbe(finalPayload, reqsResolved.value);
+      }
+
       // Шаг 5-6: отправка (с учётом duplicate/delay) и наблюдение.
       const sendCount = await this.performSends(injector, attempt, finalPayload, sends, (v) => {
         if (v >= 200 && v < 300) resourceIssued = true;
@@ -233,6 +262,7 @@ export class BcRunner {
         resourceIssued,
         settleAccepted,
         facts: injector.getFacts(),
+        drain,
       };
     } catch (error) {
       return {
@@ -241,6 +271,7 @@ export class BcRunner {
         resourceIssued,
         settleAccepted,
         facts: injector.getFacts(),
+        drain,
         error: error instanceof Error ? error.message : String(error),
       };
     }

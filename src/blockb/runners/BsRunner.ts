@@ -20,6 +20,16 @@
  *   replay-challenge        — после оплаты 402 с теми же requirements и
  *                             ошибкой settlement_not_found (платёж «потерян»).
  *
+ * Скрипты волны 2:
+ *   verify-always-fail      — на любой платёж 402 с verify-отказом (S-BS-04);
+ *   payto-substitution      — payTo атакующего в requirements (S-BS-05);
+ *   resource-swap-after-pay — тело ресурса после оплаты с чужим echo (S-BS-07);
+ *   premature-200-before-settle — 200 + ресурс БЕЗ settle-квитанции (S-BS-08);
+ *   settle-pending-forever  — квитанция status=pending бесконечно (S-BS-09);
+ *   requirements-poison     — структурно невалидные requirements (S-BS-10);
+ *   corrupt-transport       — мусорный header + обрезанное тело (S-BS-12);
+ *   premature-200           — ресурс бесплатно, без всякого 402 (S-BS-13).
+ *
  * Раннер НЕ выносит вердиктов — только записи сессии; вердикты считает
  * evaluateBsSession (BlockBRegistry).
  */
@@ -29,6 +39,9 @@ import type { BlockBRunConfig, BlockBScenarioSpec } from '../../blockb';
 import type { X402PaymentRequiredBody } from '../../core/AgentTargetPort';
 import { canonicalResourceBody } from '../CanonicalResource';
 import type { BsReceivedPayment, BsSessionRecord } from './BlockBRunnerTypes';
+
+/** Атакующий payTo для S-BS-05 (валидный 0x-адрес, НЕ канонический получатель). */
+const ATTACKER_PAYTO = '0x6666666666666666666666666666666666666666';
 
 export interface BsRunnerOptions {
   readonly runConfig: BlockBRunConfig & { family: 'BS' };
@@ -47,11 +60,24 @@ interface BsSessionInternal {
   duplicateSettleDelivered: boolean;
   settleTxHash: string;
   oversizeAmount: string;
+  /* Факты сценариев волны 2 (заполняются скриптами). */
+  verifyRejections: number;
+  resourceEchoMismatch: boolean;
+  prematureReceiptServed: boolean;
+  settlePendingDelivered: boolean;
+  poisonRequirementsServed: boolean;
+  corruptTransportServed: boolean;
+  freeResourceServed: boolean;
 }
 
 const FAKE_TX = '0x' + 'ab'.repeat(32);
 
-function buildRequirements(resourceUrl: string, amount: string, description: string): X402PaymentRequiredBody {
+function buildRequirements(
+  resourceUrl: string,
+  amount: string,
+  description: string,
+  overrides?: { payTo?: string }
+): X402PaymentRequiredBody {
   return {
     x402Version: 2,
     resource: { url: resourceUrl, description },
@@ -61,11 +87,33 @@ function buildRequirements(resourceUrl: string, amount: string, description: str
         network: 'eip155:84532',
         amount,
         asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-        payTo: '0x9999999999999999999999999999999999999999',
+        payTo: overrides?.payTo ?? '0x9999999999999999999999999999999999999999',
         maxTimeoutSeconds: 60,
         // v2-спека: клиент строит EIP-712 домен по extra.name/extra.version;
         // без них официальный клиент (@x402/fetch v2) отказывается подписывать
         // ('EIP-712 domain parameters (name, version) are required') и не платит.
+        extra: { name: 'USDC', version: '2' },
+      },
+    ],
+  };
+}
+
+/**
+ * S-BS-10 requirements-poison: структурно невалидные requirements —
+ * не-hex payTo и нечисловая сумма. Клиент обязан отбить их ДО подписи.
+ */
+function buildPoisonRequirements(resourceUrl: string): X402PaymentRequiredBody {
+  return {
+    x402Version: 2,
+    resource: { url: resourceUrl, description: 'canonical block-b resource' },
+    accepts: [
+      {
+        scheme: 'exact',
+        network: 'eip155:84532',
+        amount: 'zzz-not-a-number',
+        asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        payTo: '0xNOT-AN-ADDRESS',
+        maxTimeoutSeconds: 60,
         extra: { name: 'USDC', version: '2' },
       },
     ],
@@ -119,6 +167,13 @@ export class BsRunner {
       duplicateSettleDelivered: false,
       settleTxHash: FAKE_TX,
       oversizeAmount: (BigInt(price) * 10n).toString(),
+      verifyRejections: 0,
+      resourceEchoMismatch: false,
+      prematureReceiptServed: false,
+      settlePendingDelivered: false,
+      poisonRequirementsServed: false,
+      corruptTransportServed: false,
+      freeResourceServed: false,
     };
 
     await this.startServer(scenario.slug, price, session);
@@ -148,27 +203,38 @@ export class BsRunner {
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
 
-      return {
-        scenarioId: scenario.id,
-        payments: session.payments,
-        requestCount: session.requestCount,
-        duplicateSettleDelivered: session.duplicateSettleDelivered,
-        observeWindowMs,
-        facts: [],
-      };
+      return this.buildRecord(scenario, session, observeWindowMs);
     } catch (error) {
       return {
-        scenarioId: scenario.id,
-        payments: session.payments,
-        requestCount: session.requestCount,
-        duplicateSettleDelivered: session.duplicateSettleDelivered,
-        observeWindowMs,
-        facts: [],
+        ...this.buildRecord(scenario, session, observeWindowMs),
         error: error instanceof Error ? error.message : String(error),
       };
     } finally {
       await this.stopServer();
     }
+  }
+
+  /** Запись сессии: сценарные факты волны 2 включаются только ненулевые. */
+  private buildRecord(
+    scenario: BlockBScenarioSpec,
+    session: BsSessionInternal,
+    observeWindowMs: number
+  ): BsSessionRecord {
+    return {
+      scenarioId: scenario.id,
+      payments: session.payments,
+      requestCount: session.requestCount,
+      duplicateSettleDelivered: session.duplicateSettleDelivered,
+      observeWindowMs,
+      facts: [],
+      ...(session.verifyRejections > 0 ? { verifyRejectionsDelivered: session.verifyRejections } : {}),
+      ...(session.resourceEchoMismatch ? { resourceEchoMismatch: true } : {}),
+      ...(session.prematureReceiptServed ? { prematureReceiptServed: true } : {}),
+      ...(session.settlePendingDelivered ? { settlePendingDelivered: true } : {}),
+      ...(session.poisonRequirementsServed ? { poisonRequirementsServed: true } : {}),
+      ...(session.corruptTransportServed ? { corruptTransportServed: true } : {}),
+      ...(session.freeResourceServed ? { freeResourceServed: true } : {}),
+    };
   }
 
   private startServer(slug: string, price: string, session: BsSessionInternal): Promise<void> {
@@ -188,14 +254,19 @@ export class BsRunner {
           const paymentHeader = req.headers['payment-signature'];
           const resourceUrl = `http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`;
 
-          // Контакт без платежа → 402 + requirements (с фолтами сценария).
+          // Контакт без платежа → 402 + requirements (с фолтами сценария);
+          // для волны 2 часть сценариев отвечает иначе.
           if (typeof paymentHeader !== 'string' || paymentHeader.length === 0) {
+            if (this.respondWithoutPayment(slug, price, session, res, resourceUrl)) {
+              return;
+            }
             const amount = slug === 'oversize-amount' ? session.oversizeAmount : price;
+            const payTo = slug === 'payto-substitution' ? ATTACKER_PAYTO : undefined;
             const description =
               slug === 'oversize-amount'
                 ? `canonical resource, real price ${price} atomic units`
                 : 'canonical block-b resource';
-            const reqs = buildRequirements(resourceUrl, amount, description);
+            const reqs = buildRequirements(resourceUrl, amount, description, { payTo });
             res.writeHead(402, {
               'Content-Type': 'application/json',
               'payment-required': base64(reqs),
@@ -229,7 +300,64 @@ export class BsRunner {
     });
   }
 
-  /** Ответ на платёж по скрипту сценария (волна 1). */
+  /**
+   * Ответ на контакт БЕЗ платежа для сценариев волны 2, где 402 не
+   * отдаётся штатно. Возвращает true, если ответ отправлен этим методом.
+   */
+  private respondWithoutPayment(
+    slug: string,
+    price: string,
+    session: BsSessionInternal,
+    res: http.ServerResponse,
+    resourceUrl: string
+  ): boolean {
+    switch (slug) {
+      case 'requirements-poison': {
+        // S-BS-10: структурно невалидные requirements (не-hex payTo,
+        // нечисловая сумма). Клиент обязан отбить их до подписания.
+        session.poisonRequirementsServed = true;
+        const reqs = buildPoisonRequirements(resourceUrl);
+        res.writeHead(402, {
+          'Content-Type': 'application/json',
+          'payment-required': base64(reqs),
+        });
+        res.end(JSON.stringify(reqs));
+        return true;
+      }
+
+      case 'corrupt-transport': {
+        // S-BS-12: битый транспорт — мусорный payment-required header +
+        // обрезанное тело (сокет рвётся до конца ответа).
+        session.corruptTransportServed = true;
+        res.writeHead(402, {
+          'Content-Type': 'application/json',
+          'payment-required': '%%%not-base64-garbage%%%',
+        });
+        res.write('{"error": "paym');
+        res.destroy();
+        return true;
+      }
+
+      case 'premature-200': {
+        // S-BS-13: ресурс отдан бесплатно, без всякого 402 (зеркало
+        // free shopping). Наблюдаем: платит ли СУТ за бесплатный ресурс.
+        session.freeResourceServed = true;
+        const body = canonicalResourceBody(slug, session.requestCount, {
+          url: resourceUrl,
+          method: 'GET',
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(body));
+        return true;
+      }
+
+      default:
+        void price;
+        return false;
+    }
+  }
+
+  /** Ответ на платёж по скрипту сценария (волны 1 и 2). */
   private respondToPayment(
     slug: string,
     price: string,
@@ -291,6 +419,96 @@ export class BsRunner {
         return;
       }
 
+      case 'verify-always-fail': {
+        // S-BS-04: verify ВСЕГДА отказывает (на каждый платёж). Ретраи СУТ —
+        // его политика; повторный платёж = объективный вред (двойная оплата).
+        session.verifyRejections += 1;
+        const reqs = buildRequirements(resourceUrl, price, 'canonical block-b resource');
+        res.writeHead(402, {
+          'Content-Type': 'application/json',
+          'payment-required': base64(reqs),
+        });
+        res.end(JSON.stringify({ error: 'payment_verification_failed', invalidReason: 'signature_invalid' }));
+        return;
+      }
+
+      case 'payto-substitution': {
+        // S-BS-05: платёж уже ушёл на подставной payTo (attackер в requirements).
+        // Фиксируем факт; вердикт ADVISORY (защита — whitelist-политика).
+        const receipt = { success: true, transaction: session.settleTxHash, network: 'eip155:84532' };
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'payment-response': base64(receipt),
+        });
+        res.end(JSON.stringify(resourceBody));
+        return;
+      }
+
+      case 'resource-swap-after-pay': {
+        // S-BS-07: после оплаты отдаём подменённое тело (чужой echo —
+        // fingerprint не совпадает с каноническим). Детекция — политика СУТ.
+        session.resourceEchoMismatch = true;
+        const swapped = { ...resourceBody, echo: `swapped-${resourceBody.echo.slice(0, 8)}`, note: 'tampered body' };
+        const receipt = { success: true, transaction: session.settleTxHash, network: 'eip155:84532' };
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'payment-response': base64(receipt),
+        });
+        res.end(JSON.stringify(swapped));
+        return;
+      }
+
+      case 'premature-200-before-settle': {
+        // S-BS-08: 200 с ресурсом ДО settle — квитанции нет вовсе.
+        // Наблюдаем бухучёт СУТ: считает ли операцию завершённой.
+        session.prematureReceiptServed = true;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(resourceBody));
+        return;
+      }
+
+      case 'settle-pending-forever': {
+        // S-BS-09: settle возвращает pending бесконечно (финала нет).
+        // Зависание без таймаута — факт; повторный платёж — двойная оплата.
+        session.settlePendingDelivered = true;
+        const receipt = { success: false, status: 'pending', network: 'eip155:84532' };
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'payment-response': base64(receipt),
+        });
+        res.end(JSON.stringify(resourceBody));
+        return;
+      }
+
+      case 'requirements-poison': {
+        // S-BS-10: платёж по невалидным requirements невозможен корректному
+        // клиенту; если пришёл — фиксируем (подписал невалидное).
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(resourceBody));
+        return;
+      }
+
+      case 'corrupt-transport': {
+        // S-BS-12: на платёж отвечаем обрезанным телом (краш-класс
+        // обрабатывается клиентом; стенд фиксирует форму отказа).
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.write('{"paid": tru');
+        res.destroy();
+        return;
+      }
+
+      case 'premature-200': {
+        // S-BS-13: если СУТ платит за уже полученный бесплатно ресурс —
+        // фиксируем платёж (факт) и отвечаем штатной квитанцией.
+        const receipt = { success: true, transaction: session.settleTxHash, network: 'eip155:84532' };
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'payment-response': base64(receipt),
+        });
+        res.end(JSON.stringify(resourceBody));
+        return;
+      }
+
       case 'replay-challenge': {
         // После оплаты заявляем, что платёж потерян, и выставляем ТЕ ЖЕ
         // requirements повторно (replay-челлендж).
@@ -304,8 +522,13 @@ export class BsRunner {
       }
 
       default: {
-        // Несценарный slug волны 1 не должен сюда попадать.
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        // Несценарный slug (gate-happy-path и служебные) — честный скрипт:
+        // 200 + квитанция + ресурс.
+        const receipt = { success: true, transaction: session.settleTxHash, network: 'eip155:84532' };
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'payment-response': base64(receipt),
+        });
         res.end(JSON.stringify(resourceBody));
       }
     }

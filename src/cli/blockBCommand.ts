@@ -34,17 +34,21 @@ import {
 } from '../blockb/BlockBScenario';
 import type { BlockBScenarioSpec } from '../blockb/BlockBScenario';
 import { PassthroughPaymentFaultInjector } from '../blockb/PaymentFaultInjector';
-import { createBcRunner, type PaymentSigner } from '../blockb/runners/BcRunner';
+import { createBcRunner, type DrainProbe, type PaymentSigner } from '../blockb/runners/BcRunner';
 import { BsRunner } from '../blockb/runners/BsRunner';
 import { runBlockBGate } from '../blockb/runners/BlockBGate';
 import {
-  assertScenarioMatchesConfig,
-  computeExitCode,
-  worstVerdict,
-  type BcAttemptObservation,
-  type RunnerReport,
-  type ScenarioRunResult,
-} from '../blockb/runners/BlockBRunnerTypes';
+  AutoFundingProvider,
+  ManualFundingProvider,
+  ManualTopUpRequiredError,
+  type BalanceSource,
+  type FaucetClient,
+  type FundingProvider,
+  type FundingReport,
+} from '../blockb/FundingProvider';
+import type { BcAttemptObservation, RunnerReport, ScenarioRunResult } from '../blockb/runners/BlockBRunnerTypes';
+import { assertScenarioMatchesConfig, computeExitCode, worstVerdict } from '../blockb/runners/BlockBRunnerTypes';
+import type { X402PaymentRequiredBody } from '../core/AgentTargetPort';
 import type { SigningBinding } from '../adapters/payment/SigningBinding';
 
 interface BlockBFlags {
@@ -60,6 +64,16 @@ interface BlockBFlags {
   price?: string;
   json: boolean;
   skipGate: boolean;
+  /** S-BC-14: URL settle-эндпоинта фасилитатора СУТ (проба дрейна). */
+  facilitatorSettleUrl?: string;
+  /** Фондирование BC (решение В3): auto = faucet + ручной fallback; manual = без faucet. */
+  funding?: 'auto' | 'manual';
+  /** URL faucet-эндпоинта (POST {wallet, amount} → {ok, txHash}). */
+  faucetUrl?: string;
+  /** RPC-эндпоинт сети для проверки баланса USDC. */
+  rpcUrl?: string;
+  /** Минимальный баланс в atomic units (дефолт 100000 = 0.1 USDC). */
+  fundingMinAtomic?: string;
 }
 
 const USAGE = [
@@ -69,7 +83,10 @@ const USAGE = [
   '  argus run  --block B --family BC [--scenario S-BC-NN] [--repeat N] --sut-url URL',
   '  argus run  --block B --family BS --scenario S-BS-NN [--observe-window-ms W] [--bind HOST:PORT]',
   'Flags: --json, --price ATOMIC_UNITS (BS), --skip-gate, --request-timeout-ms, --first-request-timeout-ms',
-  'Env:   ARGUS_B_SUT_URL, ARGUS_B_BIND, ARGUS_TEST_WALLET_PRIVATE_KEY',
+  '       --facilitator-settle-url URL (S-BC-14 frontrun-drain: settle фасилитатора СУТ)',
+  '       --funding auto|manual --faucet-url URL --rpc-url URL [--funding-min-atomic N] (BC, решение В3)',
+  'Env:   ARGUS_B_SUT_URL, ARGUS_B_BIND, ARGUS_TEST_WALLET_PRIVATE_KEY,',
+  '       ARGUS_B_FACILITATOR_SETTLE_URL, ARGUS_B_FUNDING, ARGUS_B_FAUCET_URL, ARGUS_B_RPC_URL',
 ].join('\n');
 
 export function parseBlockBArgs(argv: string[]): BlockBFlags {
@@ -121,6 +138,26 @@ export function parseBlockBArgs(argv: string[]): BlockBFlags {
         break;
       case '--skip-gate':
         flags.skipGate = true;
+        break;
+      case '--facilitator-settle-url':
+        flags.facilitatorSettleUrl = next();
+        break;
+      case '--funding': {
+        const mode = next();
+        if (mode !== 'auto' && mode !== 'manual') {
+          throw new Error(`--funding: ожидается auto|manual, получено '${mode}'\n${USAGE}`);
+        }
+        flags.funding = mode;
+        break;
+      }
+      case '--faucet-url':
+        flags.faucetUrl = next();
+        break;
+      case '--rpc-url':
+        flags.rpcUrl = next();
+        break;
+      case '--funding-min-atomic':
+        flags.fundingMinAtomic = next();
         break;
       default:
         throw new Error(`Unknown flag '${flag}'\n${USAGE}`);
@@ -244,7 +281,7 @@ function selectScenarios(flags: BlockBFlags, config: BlockBRunConfig): readonly 
     const spec = getBlockBScenario(flags.scenarioId);
     if (!spec) {
       throw new Error(
-        `Scenario '${flags.scenarioId}' not registered (wave 1 only; see docs/block-b/REGISTRY.md)`
+        `Scenario '${flags.scenarioId}' not registered (полный реестр 28 — docs/block-b/REGISTRY.md)`
       );
     }
     assertScenarioMatchesConfig(spec, config);
@@ -254,7 +291,7 @@ function selectScenarios(flags: BlockBFlags, config: BlockBRunConfig): readonly 
   if (config.family === 'BS') {
     throw new Error(
       'BS требует --scenario: каждая сессия BS — отдельный контакт СУТ с плохим сервером; ' +
-      'запускайте сценарии по одному (волна 1: ' + familyScenarios.map((s) => s.id).join(', ') + ')'
+      'запускайте сценарии по одному (всего BS: ' + familyScenarios.map((s) => s.id).join(', ') + ')'
     );
   }
   return familyScenarios;
@@ -293,17 +330,24 @@ export async function runBlockBCommand(argv: string[]): Promise<number> {
   try {
     if (flags.action === 'list') {
       validateBlockBRegistry();
-      console.log('Block B scenarios (registered in code, wave 1):');
-      for (const spec of listBlockBScenarios()) {
+      const all = listBlockBScenarios();
+      console.log(`Block B scenarios (registered in code: ${all.length} = волна 1 × 10 + волна 2 × 18):`);
+      for (const spec of all) {
         console.log(
-          `  ${spec.id}  ${spec.slug.padEnd(24)} family=${spec.family} phase=${spec.phase} wave=${spec.wave}  ${spec.title}`
+          `  ${spec.id}  ${spec.slug.padEnd(26)} family=${spec.family} phase=${spec.phase} wave=${spec.wave}  ${spec.title}`
         );
       }
-      console.log('\nПолный реестр 28 сценариев: docs/block-b/REGISTRY.md');
+      console.log('\nПолный реестр с якорями: docs/block-b/REGISTRY.md');
       return 0;
     }
 
     const config = buildRunConfig(flags);
+
+    // Фондирование BC (решение В3): до гейта и сценариев; ManualTopUpRequiredError
+    // уходит во внешний catch → exit 2 с точной инструкцией (адрес + недостаёт).
+    if (config.family === 'BC' && flags.funding) {
+      printFunding(await ensureBcFunded(flags), flags.json);
+    }
 
     if (flags.action === 'gate') {
       const gate = await runGateForConfig(config, flags);
@@ -363,13 +407,143 @@ export async function runBlockBCommand(argv: string[]): Promise<number> {
 }
 
 function resolveBcSigner(): PaymentSigner {
+  return walletSigner(resolveBcPrivateKey());
+}
+
+function resolveBcPrivateKey(): `0x${string}` {
   const pk = process.env.ARGUS_TEST_WALLET_PRIVATE_KEY as `0x${string}` | undefined;
   if (!pk) {
     throw new Error(
       'BC runs require ARGUS_TEST_WALLET_PRIVATE_KEY (одноразовый ключ плохого клиента)'
     );
   }
-  return walletSigner(pk);
+  return pk;
+}
+
+const USDC_BASE_SEPOLIA = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+
+/**
+ * Фондирование BC-кошелька (решение В3): проверка баланса USDC по RPC;
+ * auto — faucet (POST {wallet, amount} → {ok, txHash}) с ручным fallback;
+ * manual — только проверка и точная инструкция. Бросает ManualTopUpRequiredError
+ * (перехватывается внешним catch → exit 2 с инструкцией).
+ */
+async function ensureBcFunded(flags: BlockBFlags): Promise<FundingReport> {
+  const wallet = privateKeyToAccount(resolveBcPrivateKey()).address;
+  const required = BigInt(flags.fundingMinAtomic ?? '100000');
+  const rpcUrl = flags.rpcUrl ?? process.env.ARGUS_B_RPC_URL;
+  if (!rpcUrl) {
+    throw new Error('--funding требует --rpc-url (env ARGUS_B_RPC_URL) для проверки баланса USDC\n' + USAGE);
+  }
+  const balanceSource: BalanceSource = {
+    async getBalance(address) {
+      const data = '0x70a08231' + address.replace(/^0x/, '').toLowerCase().padStart(64, '0');
+      const res = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'eth_call',
+          params: [{ to: USDC_BASE_SEPOLIA, data }, 'latest'],
+        }),
+      });
+      const json = (await res.json()) as { result?: string; error?: { message?: string } };
+      if (!json.result) {
+        throw new Error(`eth_call balanceOf failed: ${json.error?.message ?? `HTTP ${res.status}`}`);
+      }
+      return BigInt(json.result);
+    },
+  };
+
+  let provider: FundingProvider;
+  if (flags.funding === 'auto') {
+    const faucetUrl = flags.faucetUrl ?? process.env.ARGUS_B_FAUCET_URL;
+    if (!faucetUrl) {
+      throw new Error('--funding auto требует --faucet-url (env ARGUS_B_FAUCET_URL)\n' + USAGE);
+    }
+    const faucet: FaucetClient = {
+      name: new URL(faucetUrl).host,
+      async drip(address, amount) {
+        const res = await fetch(faucetUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet: address, amount: amount.toString() }),
+        });
+        const json = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          success?: boolean;
+          txHash?: string;
+          transaction?: string;
+          error?: string;
+        };
+        const ok = json.ok === true || json.success === true || !!json.txHash || !!json.transaction;
+        return {
+          ok,
+          txHash: json.txHash ?? json.transaction,
+          error: ok ? undefined : json.error ?? `HTTP ${res.status}`,
+        };
+      },
+    };
+    provider = new AutoFundingProvider(balanceSource, faucet);
+  } else {
+    provider = new ManualFundingProvider(balanceSource);
+  }
+  return provider.ensureFunded(wallet, required);
+}
+
+function printFunding(report: FundingReport, json: boolean): void {
+  if (json) {
+    console.error(JSON.stringify({ funding: report }, null, 2));
+    return;
+  }
+  console.log(
+    `  Funding: ${report.source} — баланс ${report.balanceBefore} → ${report.balanceAfter ?? 'n/a'} ` +
+      `(требуется ${report.required})${report.message ? ` [${report.message}]` : ''}`
+  );
+}
+
+/**
+ * Проба дрейна (S-BC-14): POST {x402Version, paymentPayload, paymentRequirements}
+ * на settle-эндпоинт фасилитатора СУТ — атакующий проводит authorization ДО settle СУТ.
+ */
+function makeFacilitatorDrainProbe(url: string): DrainProbe {
+  return async (payload, reqs) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      let paymentPayload: unknown = payload;
+      try {
+        paymentPayload = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8'));
+      } catch {
+        // не Base64-JSON — отправляем как есть
+      }
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x402Version: 2, paymentPayload, paymentRequirements: reqs }),
+        signal: controller.signal,
+      });
+      const text = await res.text();
+      let settled = false;
+      let reason: string | undefined;
+      try {
+        const parsed = JSON.parse(text) as {
+          success?: boolean;
+          error?: string;
+          invalidReason?: string;
+          transaction?: string;
+        };
+        settled = res.status === 200 && (parsed.success === true || !!parsed.transaction);
+        reason = parsed.error ?? parsed.invalidReason;
+      } catch {
+        reason = text.slice(0, 200);
+      }
+      return { settled, status: res.status, reason, raw: text.slice(0, 400) };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 }
 
 async function runGateForConfig(
@@ -391,12 +565,14 @@ async function runBcScenario(
   signer: PaymentSigner,
   flags: BlockBFlags
 ): Promise<ScenarioRunResult> {
+  const settleUrl = flags.facilitatorSettleUrl ?? process.env.ARGUS_B_FACILITATOR_SETTLE_URL;
   const injector = spec.createInjector();
   const runner = createBcRunner({
     runConfig: { ...config, family: 'BC' } as BlockBRunConfig & { family: 'BC' },
     scenario: spec,
     signer,
     requestTimeoutMs: flags.requestTimeoutMs,
+    drainProbe: settleUrl ? makeFacilitatorDrainProbe(settleUrl) : undefined,
   });
   const startedAt = Date.now();
   const repeat = flags.repeat > 0 ? flags.repeat : (spec.suggestedRepeat ?? 1);

@@ -11,6 +11,18 @@ import type { BlockBRunConfig, BlockBVerdict, BlockBGateResult, BlockBScenarioSp
 import type { Family } from '../BlockBRoles';
 import type { PaymentFact } from '../PaymentFaultInjector';
 
+/**
+ * Результат settle-дрейна (S-BC-14 frontrun-drain): атакующий submits
+ * подписанную authorization напрямую в фасилитатор ДО settle СУТ.
+ */
+export interface DrainProbeResult {
+  /** Фасилитатор подтвердил settlement дрейнованного платежа. */
+  readonly settled: boolean;
+  readonly status?: number;
+  readonly reason?: string;
+  readonly raw?: string;
+}
+
 /** Одна отправка плохим клиентом и ответ СУТ (семейство BC). */
 export interface BcSendRecord {
   readonly seq: number;
@@ -30,6 +42,8 @@ export interface BcAttemptObservation {
   readonly resourceIssued: boolean;
   readonly settleAccepted: boolean;
   readonly facts: readonly PaymentFact[];
+  /** S-BC-14: результат дрейна authorization до отправки СУТ. */
+  readonly drain?: DrainProbeResult;
   readonly error?: string;
 }
 
@@ -42,7 +56,11 @@ export interface BsReceivedPayment {
   readonly atMs: number;
 }
 
-/** Запись сессии BS: всё, что зафиксировал раннер за окно наблюдения. */
+/**
+ * Запись сессии BS: всё, что зафиксировал раннер за окно наблюдения.
+ * Поля сценарных фактов волны 2 — опциональные: заполняются только теми
+ * скриптами, для которых они являются наблюдением сценария.
+ */
 export interface BsSessionRecord {
   readonly scenarioId: string;
   readonly payments: readonly BsReceivedPayment[];
@@ -50,6 +68,20 @@ export interface BsSessionRecord {
   readonly duplicateSettleDelivered: boolean;
   readonly observeWindowMs: number;
   readonly facts: readonly PaymentFact[];
+  /** S-BS-04: сколько verify-отказов доставлено СУТ. */
+  readonly verifyRejectionsDelivered?: number;
+  /** S-BS-07: тело ресурса после оплаты отличалось от канонического. */
+  readonly resourceEchoMismatch?: boolean;
+  /** S-BS-08: 200 с ресурсом доставлен БЕЗ settle-квитанции. */
+  readonly prematureReceiptServed?: boolean;
+  /** S-BS-09: settle-квитанция со статусом pending (финала нет). */
+  readonly settlePendingDelivered?: boolean;
+  /** S-BS-10: доставлены структурно невалидные requirements. */
+  readonly poisonRequirementsServed?: boolean;
+  /** S-BS-12: битый транспорт (мусорный header/обрезанное тело). */
+  readonly corruptTransportServed?: boolean;
+  /** S-BS-13: ресурс отдан бесплатно (200 без 402). */
+  readonly freeResourceServed?: boolean;
   readonly error?: string;
 }
 

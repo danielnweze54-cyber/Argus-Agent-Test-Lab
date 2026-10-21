@@ -64,8 +64,13 @@ export interface BlockBScenarioSpec {
    * План потока попытки для семейства BC (дефолт — одна отправка).
    * replayAfterSend: после первой отправки повторить ТОТ ЖЕ binding
    * (тот же nonce) — S-BC-04 nonce-reuse.
+   * drainBeforeSend: дрейн authorization в фасилитатор ДО отправки СУТ —
+   * S-BC-14 frontrun-drain (отцепляемый: требует probe-конфигурации).
    */
-  readonly bcPlan?: { readonly replayAfterSend?: boolean };
+  readonly bcPlan?: {
+    readonly replayAfterSend?: boolean;
+    readonly drainBeforeSend?: boolean;
+  };
   /** Фабрика инжектора фолтов этого сценария. */
   readonly createInjector: () => PaymentFaultInjector;
 }
