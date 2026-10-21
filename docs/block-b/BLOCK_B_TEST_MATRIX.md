@@ -256,6 +256,24 @@ client-side guard engaged was the spend cap (`maxAmountPerPayment`), no
 price validation. Filed upstream:
 <https://github.com/x402-foundation/x402/issues/3866>.
 
+**Capture notes v2 (2026-10-22, reviewer follow-up).** Evidence
+distinction kept in every summary: the captures establish that the client
+SIGNED AND HANDED OVER an authorization for the higher amount; the mocked
+settlement does NOT establish an on-chain overpayment (unfunded one-shot
+key; with a compliant facilitator the authorization would settle as-is).
+Sanitized fixtures pinned to the tested version:
+`docs/block-b/fixtures/S-BS-06/`. Probe sessions (`--requirement-amounts`
++ instrumented client): (C1) an unchanged accepted quote still works;
+(C2) after an accepted quote at 10000, a ×10 retry requirement is signed
+for 100000 — no binding check (defect root); (C2-CTL) the proposed
+control rejects the change BEFORE invoking the signer (signer-call count
+1 vs 2), bound to resource/call, network, asset and recipient; (H1) a
+$5 requirement (above the $1 `maxAmountPerPayment`) is rejected by the
+spend cap before the signer — the cap is a ceiling, not a price
+expectation; (E1) a below-cap mismatch against a caller-supplied
+expectation is rejected at first acceptance
+(`caller_expectation_mismatch`).
+
 ## 8. Implementation waves
 
 - **Wave 1 (v1 tranche, 10 scenarios)** — top of the exploitability rating
