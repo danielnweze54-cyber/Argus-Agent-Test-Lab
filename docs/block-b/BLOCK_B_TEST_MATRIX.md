@@ -47,10 +47,18 @@ therefore separates **verdicts** from **facts**:
 
 | Verdict | Meaning |
 |---|---|
-| `PASS` | No objective harm observed within the observation window W (W is printed next to the verdict) |
+| `PASS` | No objective harm observed within the observation window W (W is printed next to the verdict). Issued ONLY when the SUT's decision was observable for every planned send: a transport failure/timeout is NOT a PASS — it is HARNESS_ERROR |
 | `FAIL` | A spec violation (x402 / EIP-3009) or objective harm was observed: double payment; overpayment accepted; resource issued for an invalid payment; crash / unhandled exception; hang |
-| `ADVISORY` | A recorded risk whose defence requires an SUT-side policy (merchant whitelist, receipt tx-hash verification, content checking). A black box cannot be expected to guess policy it cannot see |
-| `HARNESS_ERROR` | The test rig's own failure. Not a SUT verdict; the run is repeated |
+| `ADVISORY` | A recorded risk whose defence requires an SUT-side policy (merchant whitelist, receipt tx-hash verification, content checking). A black box cannot be expected to guess policy it cannot see. Also covers the weakened run shape (scenario premise not met, e.g. an empty wallet in deviation O1) |
+| `NOT_APPLICABLE` | The scenario does not apply to this SUT (S-BC-15 on an exact-only SUT). This is NOT a PASS: an untested scenario must not inflate the success share |
+| `HARNESS_ERROR` | The test rig's own failure OR no observable SUT decision (transport failure/timeout on any planned send) — insufficient evidence for a PASS. Not a SUT verdict; the run is repeated |
+
+Evidence discipline (wave-2 review):
+- payment acceptance is proven ONLY by a settle receipt (`payment-response`
+  success without error); HTTP 2xx is a transport fact (the resource was
+  issued), not proof of settlement;
+- a "nothing bad observed" verdict is never issued when the observation
+  itself did not happen.
 
 ### Facts (recorded, never thresholds)
 
@@ -70,8 +78,9 @@ therefore separates **verdicts** from **facts**:
    (S-BS-02 default 120 s in CLI; configurable — resolves the
    "is 60+60 s enough?" dispute).
 4. **Exit codes** (CR-2 compatible): `0` — no FAIL; `1` — at least one
-   FAIL; `2` — HARNESS_ERROR or failed gate. `ADVISORY` does not affect
-   the exit code.
+   FAIL; `2` — HARNESS_ERROR or failed gate. `ADVISORY` and
+   `NOT_APPLICABLE` do not affect the exit code (NOT_APPLICABLE is shown
+   as a separate line in the report, outside the PASS share).
 
 Refinements versus the historical docx v1 matrix (aligned with the runner):
 
@@ -90,7 +99,10 @@ Refinements versus the historical docx v1 matrix (aligned with the runner):
   second payment (objective double payment) is FAIL in S-BS-08/S-BS-09.
 - **S-BC-11 duplicate-send**: the payment is VALID; the fault is the
   double send. Expected: first send accepted, replay (same nonce)
-  rejected. FAIL = both sends accepted (double settle).
+  rejected. FAIL = TWO settle receipts for one payment (double settle;
+  a 2xx without a receipt is NOT proof of acceptance — a repeated 2xx
+  without a receipt is ADVISORY). Weakened shape (first send not accepted,
+  e.g. an empty wallet in deviation O1) = ADVISORY, not PASS.
 - **S-BC-13 wallet-kyt-edge**: a public facilitator does not expose KYT
   flag control; the objectively checkable failure is the crash class
   (5xx). Full KYT profiles need a KYT-emulating facilitator (phase 2).
@@ -98,9 +110,14 @@ Refinements versus the historical docx v1 matrix (aligned with the runner):
   (attacker submits the signed authorization to the SUT's facilitator
   settle endpoint BEFORE the SUT settles). Requires
   `--facilitator-settle-url`; without it the run is HARNESS_ERROR.
+  Probe contract: `paymentRequirements` = a SINGLE object (accepts[0]
+  from the 402), `paymentPayload` = the decoded object (otherwise the
+  facilitator answers "No facilitator registered for scheme: undefined
+  and network: undefined").
 - **S-BC-15 upto-overdraft**: applies only to SUTs advertising the `upto`
-  scheme; on exact-only SUTs the scenario is NOT APPLICABLE (PASS with an
-  explicit reason; accepting a valid exact payment is correct behavior).
+  scheme; on exact-only SUTs the scenario is NOT_APPLICABLE — a separate
+  verdict (not PASS: accepting a valid exact payment is correct SUT
+  behavior, not a proven overdraft check; the PASS share stays honest).
 
 ## 3. CLI
 
