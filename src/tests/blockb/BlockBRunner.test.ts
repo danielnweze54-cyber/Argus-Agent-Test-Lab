@@ -433,4 +433,23 @@ describe('Verdict aggregation and CLI', () => {
     const exit = await runBlockBCommand(['run', '--block', 'B', '--family', 'BS', '--skip-gate']);
     expect(exit).toBe(2);
   });
+
+  it('runBlockBCommand: --bind HOST:PORT нормализуется в http://HOST:PORT (регрессия Invalid URL)', async () => {
+    // До фиксы '0.0.0.0:4401' падало с 'Block B error: Invalid URL' на new URL();
+    // теперь сервер стартует, клиент не приходит => HARNESS_ERROR (exit 2) вместо 'Invalid URL'.
+    const exit = await runBlockBCommand([
+      'run', '--block', 'B', '--family', 'BS', '--scenario', 'S-BS-01',
+      '--bind', '0.0.0.0:4401', '--skip-gate',
+      '--first-request-timeout-ms', '100', '--observe-window-ms', '1',
+    ]);
+    expect(exit).toBe(2);
+  });
+
+  it('runBlockBCommand: --bind с мусорным значением => exit 2 с читаемой ошибкой', async () => {
+    const exit = await runBlockBCommand([
+      'run', '--block', 'B', '--family', 'BS', '--scenario', 'S-BS-01',
+      '--bind', 'not a url at all', '--skip-gate',
+    ]);
+    expect(exit).toBe(2);
+  });
 });

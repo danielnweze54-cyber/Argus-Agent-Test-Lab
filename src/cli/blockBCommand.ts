@@ -197,9 +197,20 @@ function requireSutUrl(flags: BlockBFlags): string {
 }
 
 function requireBind(flags: BlockBFlags): string {
-  const bind = flags.bind ?? process.env.ARGUS_B_BIND;
-  if (!bind) {
+  const raw = flags.bind ?? process.env.ARGUS_B_BIND;
+  if (!raw) {
     throw new Error('BS runs require --bind HOST:PORT (or env ARGUS_B_BIND): адрес плохого сервера Аргуса\n' + USAGE);
+  }
+  // Usage заявляет HOST:PORT; BsRunner парсит значение через new URL(),
+  // поэтому без схемы добавляем http:// (иначе '0.0.0.0:4401' → Invalid URL).
+  const bind = raw.includes('://') ? raw : `http://${raw}`;
+  try {
+    const parsed = new URL(bind);
+    if (parsed.protocol !== 'http:') {
+      throw new Error('unsupported protocol');
+    }
+  } catch {
+    throw new Error(`Invalid --bind value '${raw}': ожидается HOST:PORT\n` + USAGE);
   }
   return bind;
 }

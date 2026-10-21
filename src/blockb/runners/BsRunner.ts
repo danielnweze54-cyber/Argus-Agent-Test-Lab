@@ -63,6 +63,10 @@ function buildRequirements(resourceUrl: string, amount: string, description: str
         asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
         payTo: '0x9999999999999999999999999999999999999999',
         maxTimeoutSeconds: 60,
+        // v2-спека: клиент строит EIP-712 домен по extra.name/extra.version;
+        // без них официальный клиент (@x402/fetch v2) отказывается подписывать
+        // ('EIP-712 domain parameters (name, version) are required') и не платит.
+        extra: { name: 'USDC', version: '2' },
       },
     ],
   };
