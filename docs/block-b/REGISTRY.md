@@ -63,7 +63,7 @@
 | S-BS-03 | verify-pass-settle-fail | 1 | 1 | `verify` OK, `settle` «успех» без on-chain транзакции | GitHub #1065 (боль №1); denial of settlement |
 | S-BS-04 | verify-always-fail | 1 | 2 | `verify` всегда отказывает с валидной причиной | CDP: verification failures |
 | S-BS-05 | payto-substitution | 1 | 2 | Requirements ведут на `payTo` атакующего | arXiv 2605.30998: I3/I5; ADVISORY |
-| S-BS-06 | oversize-amount | 1 | 1 | Requirements требуют больше реальной цены (переплата) | решение В2: приём переплаты = FAIL |
+| S-BS-06 | oversize-amount | 1 | 1 | Requirements требуют больше реальной цены (переплата) | решение В2: приём переплаты = FAIL; upstream: x402-foundation/x402#3866 |
 | S-BS-07 | resource-swap-after-pay | 1 | 2 | После оплаты отдаётся подменённое тело ресурса | I3; детекция по echo-fingerprint |
 | S-BS-08 | premature-200-before-settle | 1 | 2 | 200 с ресурсом до settle | наблюдение состояния СУТ; ADVISORY |
 | S-BS-09 | settle-pending-forever | 1 | 2 | `settle` возвращает pending бесконечно | denial of settlement; ADVISORY |
@@ -71,6 +71,15 @@
 | S-BS-11 | replay-challenge | 1 | 1 | Повторное выставление того же nonce после успешной оплаты | NDSS'26 TOCTOU; FAIL при втором платеже |
 | S-BS-12 | corrupt-transport | 1 | 2 | Битые заголовки / обрезанные тела 402/200 | robustness; FAIL при краше/зависании |
 | S-BS-13 | premature-200 | 1 | 2 | 200 без всякого 402 (ресурс «бесплатно») | зеркало free shopping; ADVISORY |
+
+## Внешние находки (живой прогон 2026-10-21, Base Sepolia)
+
+- **S-BS-06 (oversize-amount)** против официального клиента `@x402/fetch` +
+  `@x402/core` + `@x402/evm` v2.28.0: клиент подписал и отправил EIP-3009
+  авторизацию на ×10 завышенную сумму требований (`value: 100000` при
+  канонической цене `10000`), 3/3 сессий — FAIL по В2; единственная защита
+  клиента — spend-кап (`maxAmountPerPayment`), валидации цены нет.
+  Оформлено апстриму: <https://github.com/x402-foundation/x402/issues/3866>.
 
 ## Связанные документы и код
 

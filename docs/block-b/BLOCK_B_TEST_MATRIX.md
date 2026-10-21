@@ -229,6 +229,16 @@ state. Retry thresholds are **never** verdicts.
 
 \* See the refinement notes in §2.
 
+### Known upstream finding (live run 2026-10-21, Base Sepolia)
+
+S-BS-06 (oversize-amount) against the official client `@x402/fetch` +
+`@x402/core` + `@x402/evm` v2.28.0: the client signed and submitted an
+EIP-3009 authorization for the ×10 inflated requirement (`value: 100000`
+at a canonical price of `10000`), 3/3 sessions — FAIL per V2; the only
+client-side guard engaged was the spend cap (`maxAmountPerPayment`), no
+price validation. Filed upstream:
+<https://github.com/x402-foundation/x402/issues/3866>.
+
 ## 8. Implementation waves
 
 - **Wave 1 (v1 tranche, 10 scenarios)** — top of the exploitability rating
