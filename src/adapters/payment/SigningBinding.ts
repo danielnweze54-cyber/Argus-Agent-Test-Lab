@@ -20,6 +20,9 @@
  * готовый SigningBinding и обязуется НЕ генерировать локально
  * nonce / validAfter / validBefore.
  */
+
+import { randomBytes } from 'node:crypto';
+
 export interface SigningBinding {
   /** authorizer (адрес подписанта, buyer-side) */
   from: string;
@@ -78,29 +81,29 @@ export function validateSigningBinding(b: SigningBinding): void {
  * layer (Secretariat). Механизм доставки (wire boundary) фиксируется
  * на cross-system этапе и ЗДЕСЬ НЕ проектируется.
  *
- * На текущем Argus-этапе в тестовой среде допускается детерминированный
- * placeholder (см. defaultSigningIntentSource), который передаёт эти
- * поля в PaymentAdapter как внешние — adapter по-прежнему ничего не
- * генерирует локально.
+ * На текущем Argus-этапе в тестовой среде defaultSigningIntentSource
+ * формирует nonce через crypto.randomBytes: EIP-3009 требует уникальный
+ * nonce на каждую authorization, нулевой/детерминированный nonce —
+ * replay-риск (находка аудита MAJ-4; пререквизит сценариев блока B
+ * S-BC-04 nonce-reuse и S-BS-11 replay-challenge). Поля по-прежнему
+ * формируются вне PaymentAdapter — adapter ничего не генерирует локально.
  */
 export type SigningIntentSource = (paymentRequired: {
   maxTimeoutSeconds: number;
 }) => { nonce: string; validAfter: string; validBefore: string };
 
 /**
- * Детерминированный TEST-ONLY placeholder источника intent.
- *
- * Используется RunOrchestrator, когда внешний bindingSource не передан.
- * Это НЕ имитация Secretariat: значения формируются вне PaymentAdapter,
- * поэтому контракт "adapter подписывает exact binding" сохраняется.
- * Nonce детерминирован (не randomBytes), чтобы unit-тесты были
- * воспроизводимыми.
+ * Источник intent по умолчанию: nonce — случайный 32-байтовый hex (MAJ-4),
+ * окно действия — от текущего времени на maxTimeoutSeconds.
+ * Воспроизводимость unit-тестов достигается инъекцией собственного
+ * детерминированного bindingSource (RunOrchestrator), а НЕ фиксированным
+ * nonce по умолчанию.
  */
 export const defaultSigningIntentSource: SigningIntentSource = (paymentRequired) => {
   const nowSec = Math.floor(Date.now() / 1000);
   const window = paymentRequired.maxTimeoutSeconds > 0 ? paymentRequired.maxTimeoutSeconds : 60;
   return {
-    nonce: `0x${'0'.repeat(64)}`,
+    nonce: `0x${randomBytes(32).toString('hex')}`,
     validAfter: String(nowSec),
     validBefore: String(nowSec + window),
   };

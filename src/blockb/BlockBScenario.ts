@@ -60,6 +60,12 @@ export interface BlockBScenarioSpec {
   readonly anchors?: readonly string[];
   /** Рекомендуемое число повторов (дефолт 1; > 1 — для гонок/replay). */
   readonly suggestedRepeat?: number;
+  /**
+   * План потока попытки для семейства BC (дефолт — одна отправка).
+   * replayAfterSend: после первой отправки повторить ТОТ ЖЕ binding
+   * (тот же nonce) — S-BC-04 nonce-reuse.
+   */
+  readonly bcPlan?: { readonly replayAfterSend?: boolean };
   /** Фабрика инжектора фолтов этого сценария. */
   readonly createInjector: () => PaymentFaultInjector;
 }

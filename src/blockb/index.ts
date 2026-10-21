@@ -63,3 +63,27 @@ export {
 } from './CanonicalResource';
 
 export { S_BC_01_BadSignature, corruptPaymentPayload } from './examples/S_BC_01_BadSignature';
+
+export {
+  BLOCK_B_WAVE1_SCENARIOS,
+  listBlockBScenarios,
+  getBlockBScenario,
+  validateBlockBRegistry,
+  evaluateBcAttempt,
+  evaluateBsSession,
+  type VerdictEvaluation,
+} from './BlockBRegistry';
+
+export type {
+  BcSendRecord,
+  BcAttemptObservation,
+  BsReceivedPayment,
+  BsSessionRecord,
+  ScenarioRunResult,
+  RunnerReport,
+} from './runners/BlockBRunnerTypes';
+export { worstVerdict, computeExitCode, assertScenarioMatchesConfig } from './runners/BlockBRunnerTypes';
+
+export { BcRunner, createBcRunner, parseRequirements, parsePaymentResponse, type PaymentSigner, type BcRunnerOptions } from './runners/BcRunner';
+export { BsRunner, decodePayment, type BsRunnerOptions } from './runners/BsRunner';
+export { runBlockBGate, type GateOptions } from './runners/BlockBGate';
