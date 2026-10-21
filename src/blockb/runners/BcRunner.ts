@@ -339,7 +339,11 @@ export class BcRunner {
 
       const observation: SettlementObservation = {
         phase: paymentResponseRaw ? 'settle' : 'verify',
-        accepted: settle.accepted || (resObj.status >= 200 && resObj.status < 300 && !!paymentResponseRaw),
+        // Дисциплина доказательств: принятие платежа подтверждает ТОЛЬКО
+        // settle-квитанция (success без error). HTTP 2xx — транспортный
+        // факт (ресурс выдан → resourceIssued), но не доказательство
+        // settle: ответ 200 с явным отказом в квитанции не «принят».
+        accepted: settle.accepted,
         reason: resObj.status === 402 ? this.extractError(resObj) : settle.reason,
         raw: paymentResponseRaw,
       };

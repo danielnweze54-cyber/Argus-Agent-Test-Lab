@@ -19,7 +19,7 @@ import { scenarioId } from './BlockBRoles';
 import { PassthroughPaymentFaultInjector } from './PaymentFaultInjector';
 import type { PaymentFact } from './PaymentFaultInjector';
 import { S_BC_01_BadSignature } from './examples/S_BC_01_BadSignature';
-import type { BcAttemptObservation, BsSessionRecord } from './runners/BlockBRunnerTypes';
+import type { BcAttemptObservation, BcSendRecord, BsSessionRecord } from './runners/BlockBRunnerTypes';
 
 export interface VerdictEvaluation {
   readonly verdict: BlockBVerdict;
@@ -56,6 +56,37 @@ export function evaluateBcAttempt(
   }
 }
 
+/**
+ * Дисциплина доказательств: PASS возможен только при наблюдаемом решении СУТ
+ * по каждой отправке плана. Транспортный сбой/таймаут (status null + error) —
+ * отсутствие наблюдения, а не отсутствие нарушения → HARNESS_ERROR.
+ * status null БЕЗ ошибки — запланированный дроп инжектора (наблюдать нечего
+ * по плану; фиксируем в причинах, но не валим прогон).
+ */
+function transportFailures(sends: readonly BcSendRecord[]): readonly BcSendRecord[] {
+  return sends.filter((s) => s.status === null && s.error);
+}
+
+function plannedDrops(sends: readonly BcSendRecord[]): number {
+  return sends.filter((s) => s.status === null && !s.error).length;
+}
+
+function statusesOf(sends: readonly BcSendRecord[]): string {
+  return sends.map((s) => (s.status === null ? (s.error ? 'network-error' : 'dropped') : String(s.status))).join(', ') || 'нет';
+}
+
+/** HARNESS_ERROR: наблюдения нет — PASS невозможен (принцип «факты или не вердикт»). */
+function unobservedVerdict(sends: readonly BcSendRecord[]): VerdictEvaluation {
+  const failed = transportFailures(sends);
+  return {
+    verdict: 'HARNESS_ERROR',
+    reasons: [
+      `нет наблюдаемого решения СУТ по ${failed.length} отправке(ам) из ${sends.length} — недостаточно доказательств для PASS`,
+      ...failed.map((s) => `отправка #${s.seq}: ${s.error ?? 'transport failure'}`),
+    ],
+  };
+}
+
 /** Общая ветка BC: невалидный платёж должен быть отклонён без выдачи ресурса. */
 function evaluateBcGeneric(spec: BlockBScenarioSpec, obs: BcAttemptObservation): VerdictEvaluation {
   const reasons: string[] = [];
@@ -74,12 +105,15 @@ function evaluateBcGeneric(spec: BlockBScenarioSpec, obs: BcAttemptObservation):
   if (reasons.length > 0) {
     return { verdict: 'FAIL', reasons };
   }
+  if (transportFailures(obs.sends).length > 0) {
+    return unobservedVerdict(obs.sends);
+  }
+  const drops = plannedDrops(obs.sends);
   return {
     verdict: 'PASS',
     reasons: [
-      `невалидный платёж отклонён; отправок: ${obs.sends.length}; статусы: ${obs.sends
-        .map((s) => (s.status === null ? 'network-error' : String(s.status)))
-        .join(', ') || 'нет'}`,
+      `невалидный платёж отклонён; отправок: ${obs.sends.length}; статусы: ${statusesOf(obs.sends)}` +
+        (drops > 0 ? `; запланированных дропов: ${drops}` : ''),
     ],
   };
 }
@@ -87,7 +121,14 @@ function evaluateBcGeneric(spec: BlockBScenarioSpec, obs: BcAttemptObservation):
 /**
  * S-BC-11 duplicate-send: платёж ВАЛИДЕН, фолт — двойная отправка подряд.
  * Ожидаемое поведение СУТ: первое отправление принять, повтор (тот же nonce)
- * отклонить. FAIL = приняты ОБА (двойное settle по одному платежу).
+ * отклонить. Принятие платежа подтверждает ТОЛЬКО settle-квитанция:
+ * FAIL = ДВЕ settle-квитанции по одному платежу (двойное settle).
+ * HTTP 2xx без квитанции — транспортный факт (ресурс выдан), но не
+ * доказательство settle: повтор 2xx без квитанции = ADVISORY (принятие
+ * не подтверждено, но и не опровергнуто).
+ * Ослабленная форма (первое отправление не принято — например, пустой
+ * кошелёк в режиме О1) = ADVISORY: решения наблюдаемы, но гонка double-accept
+ * не исполнена — PASS такой прогон не получает.
  */
 function evaluateBcDuplicateSend(obs: BcAttemptObservation): VerdictEvaluation {
   if (obs.sends.length < 2) {
@@ -96,25 +137,54 @@ function evaluateBcDuplicateSend(obs: BcAttemptObservation): VerdictEvaluation {
       reasons: [`план дубликата не исполнен (отправок: ${obs.sends.length} < 2)`],
     };
   }
-  const accepted = obs.sends.filter(
-    (s) => s.settleAccepted || (s.status !== null && s.status >= 200 && s.status < 300)
-  );
-  const statuses = obs.sends
-    .map((s) => (s.status === null ? 'network-error' : String(s.status)))
-    .join(', ');
-  if (accepted.length >= 2) {
+  if (transportFailures(obs.sends).length > 0) {
+    return unobservedVerdict(obs.sends);
+  }
+  const [first, second] = obs.sends;
+  const settled = obs.sends.filter((s) => s.settleAccepted); // только квитанции
+  const statuses = statusesOf(obs.sends);
+  if (settled.length >= 2) {
     return {
       verdict: 'FAIL',
       reasons: [
-        `FAIL: оба отправления приняты (статусы: ${statuses}) — двойное settle по одному платежу`,
+        `FAIL: оба отправления подтверждены settle-квитанциями (статусы: ${statuses}) — двойное settle по одному платежу`,
+      ],
+    };
+  }
+  const firstAccepted = first.settleAccepted || (first.status !== null && first.status >= 200 && first.status < 300);
+  const secondRejected =
+    second.status === 402 ||
+    (second.status !== null && second.status >= 200 && second.status < 300 && !!second.paymentResponseRaw);
+  const second2xxNoReceipt =
+    second.status !== null && second.status >= 200 && second.status < 300 && !second.paymentResponseRaw;
+  if (firstAccepted && secondRejected) {
+    return {
+      verdict: 'PASS',
+      reasons: [
+        `первое отправление: принято (платёж валиден); повтор: отклонён; статусы: ${statuses}` +
+          (settled.length >= 1 ? '; settle-квитанций: 1' : ''),
+      ],
+    };
+  }
+  if (!firstAccepted) {
+    return {
+      verdict: 'ADVISORY',
+      reasons: [
+        `ослабленная форма: первое отправление не принято (статусы: ${statuses}) — гонка double-accept не исполнена; нужен фондированный кошелёк (отклонение О1)`,
+      ],
+    };
+  }
+  if (second2xxNoReceipt) {
+    return {
+      verdict: 'ADVISORY',
+      reasons: [
+        `повтор вернул 2xx БЕЗ settle-квитанции (статусы: ${statuses}) — принятие не подтверждено, но и не опровергнуто: требуется сверка на стороне СУТ`,
       ],
     };
   }
   return {
-    verdict: 'PASS',
-    reasons: [
-      `первое отправление: ${accepted.length >= 1 ? 'принято (платёж валиден)' : 'не принято'}; повтор: отклонён; статусы: ${statuses}`,
-    ],
+    verdict: 'ADVISORY',
+    reasons: [`наблюдаемая форма не совпадает с планом (статусы: ${statuses}); факты зафиксированы`],
   };
 }
 
@@ -131,9 +201,10 @@ function evaluateBcKytEdge(obs: BcAttemptObservation): VerdictEvaluation {
       reasons: ['FAIL: 5xx на платеже от граничного KYT-профиля — краш-класс вместо читаемого отказа'],
     };
   }
-  const statuses = obs.sends
-    .map((s) => (s.status === null ? 'network-error' : String(s.status)))
-    .join(', ') || 'нет';
+  if (transportFailures(obs.sends).length > 0) {
+    return unobservedVerdict(obs.sends);
+  }
+  const statuses = statusesOf(obs.sends);
   const durationMs = obs.sends.length >= 2 ? obs.sends[obs.sends.length - 1].atMs - obs.sends[0].atMs : undefined;
   return {
     verdict: 'PASS',
@@ -154,6 +225,9 @@ function evaluateBcFrontrunDrain(obs: BcAttemptObservation): VerdictEvaluation {
   if (!obs.drain) {
     return { verdict: 'HARNESS_ERROR', reasons: ['факт дрейна отсутствует (проба не исполнена)'] };
   }
+  if (transportFailures(obs.sends).length > 0) {
+    return unobservedVerdict(obs.sends);
+  }
   const drainFact = `дрейн: ${obs.drain.settled ? 'settle подтверждён фасилитатором' : 'не подтверждён'}${obs.drain.reason ? ` (${obs.drain.reason})` : ''}`;
   if (obs.resourceIssued || obs.settleAccepted) {
     return {
@@ -167,7 +241,7 @@ function evaluateBcFrontrunDrain(obs: BcAttemptObservation): VerdictEvaluation {
   return {
     verdict: 'PASS',
     reasons: [
-      `дрейнованный платёж отклонён; статусы: ${obs.sends.map((s) => (s.status === null ? 'network-error' : String(s.status))).join(', ') || 'нет'}`,
+      `дрейнованный платёж отклонён; статусы: ${statusesOf(obs.sends)}`,
       drainFact,
     ],
   };
@@ -176,15 +250,17 @@ function evaluateBcFrontrunDrain(obs: BcAttemptObservation): VerdictEvaluation {
 /**
  * S-BC-15 upto-overdraft: списокание сверх upto-потолка. Сценарий применим
  * только к СУТ с upto-схемой: фолт = факт sign_mutated от инжектора. На СУТ
- * без upto инжектор честен (сценарий НЕПРИМЕНИМ — PASS с явной причиной;
- * приём валидного exact-платежа — корректное поведение СУТ, не FAIL).
+ * без upto инжектор честен — сценарий НЕПРИМЕНИМ и получает отдельный
+ * вердикт NOT_APPLICABLE (НЕ PASS: непрогнанный сценарий не увеличивает
+ * долю успешных испытаний; приём валидного exact-платежа — корректное
+ * поведение СУТ, а не подтверждённый успех проверки overdraft).
  */
 function evaluateBcUptoOverdraft(obs: BcAttemptObservation): VerdictEvaluation {
   const mutated = obs.facts.some((f) => f.kind === 'sign_mutated');
   if (!mutated) {
     return {
-      verdict: 'PASS',
-      reasons: ['СУТ не поддерживает upto-схему — сценарий неприменим (перенос на стенд с upto-фасилитатором)'],
+      verdict: 'NOT_APPLICABLE',
+      reasons: ['СУТ не поддерживает upto-схему — сценарий неприменим (перенос на стенд с upto-фасилитатором); не засчитывается в долю PASS'],
     };
   }
   if (obs.resourceIssued || obs.settleAccepted) {
@@ -193,10 +269,13 @@ function evaluateBcUptoOverdraft(obs: BcAttemptObservation): VerdictEvaluation {
       reasons: ['FAIL: сверх-списание сверх upto-потолка принято СУТ'],
     };
   }
+  if (transportFailures(obs.sends).length > 0) {
+    return unobservedVerdict(obs.sends);
+  }
   return {
     verdict: 'PASS',
     reasons: [
-      `списание сверх потолка отклонено; статусы: ${obs.sends.map((s) => (s.status === null ? 'network-error' : String(s.status))).join(', ')}`,
+      `списание сверх потолка отклонено; статусы: ${statusesOf(obs.sends)}`,
     ],
   };
 }

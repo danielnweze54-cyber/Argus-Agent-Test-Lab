@@ -15,6 +15,17 @@
  *                   не обязан угадывать политику, которой у него не видно.
  *   HARNESS_ERROR — собственный сбой стенда. Не вердикт СУТ; прогон
  *                   повторяется, в отчёт попадает с пометкой стенда.
+ *   NOT_APPLICABLE — сценарий неприменим к данному СУТ (например,
+ *                   S-BC-15 на exact-only СУТ). Это НЕ PASS: доля
+ *                   успешных испытаний не растёт за счёт непрогнанных
+ *                   сценариев; в отчёте виден отдельной строкой.
+ *   Дисциплина доказательств: PASS выставляется только при НАБЛЮДАЕМОМ
+ *   решении СУТ по каждой отправке плана. Транспортный сбой/таймаут
+ *   (status null + error) — это отсутствие наблюдения, а не отсутствие
+ *   нарушения: такой попытке ставится HARNESS_ERROR, не PASS.
+ *   Принятие платежа подтверждается ТОЛЬКО settle-квитанцией
+ *   (payment-response success без error); HTTP 2xx — транспортный факт
+ *   (ресурс выдан), но не доказательство settle.
  *
  * Решено по итогам ревью матрицы (В1/В2):
  * - количество ретраев и форма backoff СУТ — его политика; стенд пишет
@@ -27,7 +38,7 @@ import type { Family } from './BlockBRoles';
 import { parseScenarioId, rolesForFamily, validateScenarioId } from './BlockBRoles';
 import type { PaymentFaultInjector } from './PaymentFaultInjector';
 
-export type BlockBVerdict = 'PASS' | 'FAIL' | 'ADVISORY' | 'HARNESS_ERROR';
+export type BlockBVerdict = 'PASS' | 'FAIL' | 'ADVISORY' | 'HARNESS_ERROR' | 'NOT_APPLICABLE';
 
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 

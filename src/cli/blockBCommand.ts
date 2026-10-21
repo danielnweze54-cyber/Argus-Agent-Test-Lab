@@ -34,7 +34,8 @@ import {
 } from '../blockb/BlockBScenario';
 import type { BlockBScenarioSpec } from '../blockb/BlockBScenario';
 import { PassthroughPaymentFaultInjector } from '../blockb/PaymentFaultInjector';
-import { createBcRunner, type DrainProbe, type PaymentSigner } from '../blockb/runners/BcRunner';
+import { createBcRunner, type PaymentSigner } from '../blockb/runners/BcRunner';
+import { makeFacilitatorDrainProbe } from '../blockb/runners/FacilitatorDrainProbe';
 import { BsRunner } from '../blockb/runners/BsRunner';
 import { runBlockBGate } from '../blockb/runners/BlockBGate';
 import {
@@ -48,7 +49,6 @@ import {
 } from '../blockb/FundingProvider';
 import type { BcAttemptObservation, RunnerReport, ScenarioRunResult } from '../blockb/runners/BlockBRunnerTypes';
 import { assertScenarioMatchesConfig, computeExitCode, worstVerdict } from '../blockb/runners/BlockBRunnerTypes';
-import type { X402PaymentRequiredBody } from '../core/AgentTargetPort';
 import type { SigningBinding } from '../adapters/payment/SigningBinding';
 
 interface BlockBFlags {
@@ -504,47 +504,10 @@ function printFunding(report: FundingReport, json: boolean): void {
 }
 
 /**
- * Проба дрейна (S-BC-14): POST {x402Version, paymentPayload, paymentRequirements}
- * на settle-эндпоинт фасилитатора СУТ — атакующий проводит authorization ДО settle СУТ.
+ * Проба дрейна (S-BC-14) перенесена в src/blockb/runners/FacilitatorDrainProbe.ts:
+ * paymentRequirements = ОДИН объект (accepts[0] из 402), paymentPayload —
+ * раскодированный объект. См. комментарий модуля.
  */
-function makeFacilitatorDrainProbe(url: string): DrainProbe {
-  return async (payload, reqs) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 20000);
-    try {
-      let paymentPayload: unknown = payload;
-      try {
-        paymentPayload = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8'));
-      } catch {
-        // не Base64-JSON — отправляем как есть
-      }
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ x402Version: 2, paymentPayload, paymentRequirements: reqs }),
-        signal: controller.signal,
-      });
-      const text = await res.text();
-      let settled = false;
-      let reason: string | undefined;
-      try {
-        const parsed = JSON.parse(text) as {
-          success?: boolean;
-          error?: string;
-          invalidReason?: string;
-          transaction?: string;
-        };
-        settled = res.status === 200 && (parsed.success === true || !!parsed.transaction);
-        reason = parsed.error ?? parsed.invalidReason;
-      } catch {
-        reason = text.slice(0, 200);
-      }
-      return { settled, status: res.status, reason, raw: text.slice(0, 400) };
-    } finally {
-      clearTimeout(timer);
-    }
-  };
-}
 
 async function runGateForConfig(
   config: BlockBRunConfig,

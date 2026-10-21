@@ -15,8 +15,9 @@ import {
   evaluateBsSession,
 } from '../../blockb/BlockBRegistry';
 import { createBcRunner, type DrainProbe, type PaymentSigner } from '../../blockb/runners/BcRunner';
+import { makeFacilitatorDrainProbe } from '../../blockb/runners/FacilitatorDrainProbe';
 import { BsRunner } from '../../blockb/runners/BsRunner';
-import { worstVerdict } from '../../blockb/runners/BlockBRunnerTypes';
+import { computeExitCode, worstVerdict, type BcAttemptObservation, type BcSendRecord } from '../../blockb/runners/BlockBRunnerTypes';
 import { parseBlockBArgs, runBlockBCommand } from '../../cli/blockBCommand';
 import type { SigningBinding } from '../../adapters/payment/SigningBinding';
 import type { BlockBScenarioSpec } from '../../blockb/BlockBScenario';
@@ -398,13 +399,13 @@ describe('BcRunner: wave-2 scenarios against mock SUT', () => {
     }
   });
 
-  it('S-BC-15 upto-overdraft: exact-СУТ => PASS (неприменим, приём валидного платежа — норма)', async () => {
+  it('S-BC-15 upto-overdraft: exact-СУТ => NOT_APPLICABLE (не PASS: не раздувает долю успешных)', async () => {
     const spec = getBlockBScenario('S-BC-15')!;
     const exactSut = await startMockSut('accept'); // requirements exact — инжектор честен
     try {
       const obs = await runSpec(spec, exactSut.url);
       const verdict = evaluateBcAttempt(spec, obs);
-      expect(verdict.verdict).toBe('PASS');
+      expect(verdict.verdict).toBe('NOT_APPLICABLE');
       expect(verdict.reasons[0]).toContain('неприменим');
       expect(obs.sends).toHaveLength(1); // платёж отправлен, но фолта не было
     } finally {
@@ -435,6 +436,192 @@ describe('BcRunner: wave-2 scenarios against mock SUT', () => {
     } finally {
       await rejecting.stop();
     }
+  });
+});
+
+/* --------- Регрессии: дисциплина доказательств (ревью волны 2) --------- */
+
+/** Хелпер: запись отправки с дефолтом «наблюдаемый отказ 402». */
+const send = (over: Partial<BcSendRecord> & { seq: number }): BcSendRecord => ({
+  status: 402,
+  settleAccepted: false,
+  atMs: 1,
+  ...over,
+});
+
+/** Хелпер: наблюдение попытки BC с пустыми фактами. */
+const mkObs = (sends: BcSendRecord[], over: Partial<BcAttemptObservation> = {}): BcAttemptObservation => ({
+  attempt: 1,
+  sends,
+  resourceIssued: false,
+  settleAccepted: false,
+  facts: [],
+  ...over,
+});
+
+describe('Evidence discipline: транспортный сбой не превращается в PASS', () => {
+  it('generic: все отправки — network-error => HARNESS_ERROR, не PASS', () => {
+    const spec = getBlockBScenario('S-BC-01')!;
+    const obs = mkObs([
+      send({ seq: 1, status: null, error: 'ECONNREFUSED 127.0.0.1:4021' }),
+    ]);
+    const v = evaluateBcAttempt(spec, obs);
+    expect(v.verdict).toBe('HARNESS_ERROR');
+    expect(v.reasons.some((r) => r.includes('недостаточно доказательств'))).toBe(true);
+  });
+
+  it('kyt-edge: network-error => HARNESS_ERROR (краш-класс не увиден — но и наблюдения нет)', () => {
+    const spec = getBlockBScenario('S-BC-13')!;
+    const obs = mkObs([send({ seq: 1, status: null, error: 'socket hang up' })]);
+    expect(evaluateBcAttempt(spec, obs).verdict).toBe('HARNESS_ERROR');
+  });
+
+  it('duplicate-send: повтор — network-error => HARNESS_ERROR (план не исполнен наблюдаемо)', () => {
+    const spec = getBlockBScenario('S-BC-11')!;
+    const obs = mkObs([
+      send({ seq: 1, status: 200, settleAccepted: true, paymentResponseRaw: 'YQ==' }),
+      send({ seq: 2, status: null, error: 'aborted after 15000ms' }),
+    ]);
+    const v = evaluateBcAttempt(spec, obs);
+    expect(v.verdict).toBe('HARNESS_ERROR');
+    expect(v.verdict).not.toBe('PASS');
+  });
+
+  it('frontrun-drain: дрейн не подтверждён + отправка — network-error => HARNESS_ERROR', () => {
+    const spec = getBlockBScenario('S-BC-14')!;
+    const obs = mkObs([send({ seq: 1, status: null, error: 'ECONNRESET' })], {
+      drain: { settled: false, reason: 'insufficient funds' },
+    });
+    expect(evaluateBcAttempt(spec, obs).verdict).toBe('HARNESS_ERROR');
+  });
+
+  it('запланированный дроп инжектора (status null БЕЗ ошибки) не валид прогон: PASS с фактом', () => {
+    const spec = getBlockBScenario('S-BC-01')!;
+    const obs = mkObs([send({ seq: 1, status: null })]); // дроп: без error
+    const v = evaluateBcAttempt(spec, obs);
+    expect(v.verdict).toBe('PASS');
+    expect(v.reasons[0]).toContain('дропов');
+  });
+});
+
+describe('Evidence discipline: 2xx ≠ принятый платёж', () => {
+  it('раннер: 200 с квитанцией-отказом => settleAccepted=false; ресурс при этом выдан', async () => {
+    const spec = getBlockBScenario('S-BC-01')!;
+    const errReceipt = Buffer.from(JSON.stringify({ success: false, error: 'payment_invalid' })).toString('base64');
+    const reqs = {
+      x402Version: 2,
+      resource: { url: 'http://sut/mock', description: 'mock' },
+      accepts: [{ scheme: 'exact', network: 'eip155:84532', amount: '10000', asset: ASSET, payTo: PAY_TO, maxTimeoutSeconds: 60 }],
+    };
+    let call = 0;
+    const fetchImpl: typeof fetch = async () => {
+      call += 1;
+      if (call === 1) {
+        return new Response(JSON.stringify(reqs), {
+          status: 402,
+          headers: { 'payment-required': Buffer.from(JSON.stringify(reqs)).toString('base64') },
+        });
+      }
+      return new Response(JSON.stringify({ paid: true }), {
+        status: 200,
+        headers: { 'payment-response': errReceipt },
+      });
+    };
+    const runner = createBcRunner({
+      runConfig: { family: 'BC', sutRole: 'server', resourceUrl: 'http://sut/mock', label: 'test' },
+      scenario: spec,
+      signer: stubSigner,
+      fetchImpl,
+    });
+    const obs = await runner.runAttempt(spec.createInjector(), 1);
+    expect(obs.resourceIssued).toBe(true); // 2xx — транспортный факт выдачи ресурса
+    expect(obs.sends[0]?.settleAccepted).toBe(false); // но settle квитанцией опровергнут
+    expect(evaluateBcAttempt(spec, obs).verdict).toBe('FAIL'); // ресурс по невалидному платежу
+  });
+
+  it('duplicate-send: оба 2xx БЕЗ квитанций => ADVISORY (не FAIL по 2xx, не PASS)', () => {
+    const spec = getBlockBScenario('S-BC-11')!;
+    const obs = mkObs([
+      send({ seq: 1, status: 200 }), // ресурс выдан, квитанции нет
+      send({ seq: 2, status: 200 }),
+    ]);
+    const v = evaluateBcAttempt(spec, obs);
+    expect(v.verdict).toBe('ADVISORY');
+    expect(v.reasons[0]).toContain('БЕЗ settle-квитанции');
+  });
+
+  it('duplicate-send: обе settle-квитанции => FAIL; первая принята/повтор 402 => PASS', () => {
+    const spec = getBlockBScenario('S-BC-11')!;
+    const bothSettled = mkObs([
+      send({ seq: 1, status: 200, settleAccepted: true, paymentResponseRaw: 'YQ==' }),
+      send({ seq: 2, status: 200, settleAccepted: true, paymentResponseRaw: 'Yg==' }),
+    ]);
+    expect(evaluateBcAttempt(spec, bothSettled).verdict).toBe('FAIL');
+    const honest = mkObs([
+      send({ seq: 1, status: 200, settleAccepted: true, paymentResponseRaw: 'YQ==' }),
+      send({ seq: 2, status: 402 }),
+    ]);
+    expect(evaluateBcAttempt(spec, honest).verdict).toBe('PASS');
+  });
+
+  it('duplicate-send: ослабленная форма (первое не принято) => ADVISORY, не PASS', () => {
+    const spec = getBlockBScenario('S-BC-11')!;
+    const obs = mkObs([send({ seq: 1, status: 402 }), send({ seq: 2, status: 402 })]);
+    const v = evaluateBcAttempt(spec, obs);
+    expect(v.verdict).toBe('ADVISORY');
+    expect(v.reasons[0]).toContain('ослабленная форма');
+  });
+});
+
+describe('Evidence discipline: NOT_APPLICABLE не раздувает долю PASS', () => {
+  it('worstVerdict: NOT_APPLICABLE выше PASS, но ниже ADVISORY и FAIL', () => {
+    expect(worstVerdict(['PASS', 'NOT_APPLICABLE'])).toBe('NOT_APPLICABLE');
+    expect(worstVerdict(['NOT_APPLICABLE', 'ADVISORY'])).toBe('ADVISORY');
+    expect(worstVerdict(['FAIL', 'NOT_APPLICABLE'])).toBe('FAIL');
+    expect(worstVerdict(['NOT_APPLICABLE', 'NOT_APPLICABLE'])).toBe('NOT_APPLICABLE');
+  });
+
+  it('computeExitCode: NOT_APPLICABLE без FAIL/HARNESS_ERROR => 0', () => {
+    const code = computeExitCode({
+      config: { family: 'BC', sutRole: 'server', resourceUrl: 'http://sut/mock', label: 't' },
+      scenarios: [{
+        scenarioId: 'S-BC-15', slug: 'upto-overdraft', family: 'BC', title: 't',
+        verdict: 'NOT_APPLICABLE', reasons: [], startedAtMs: 0, finishedAtMs: 0,
+      }],
+      exitCode: 0,
+      finishedAtMs: 0,
+    });
+    expect(code).toBe(0);
+  });
+});
+
+describe('S-BC-14: проба дрейна шлёт корректный контракт settle API', () => {
+  it('paymentRequirements = accepts[0] (scheme/network на верхнем уровне), payload раскодирован', async () => {
+    const reqs = {
+      x402Version: 2,
+      resource: { url: 'http://sut/weather', description: 'mock' },
+      accepts: [{
+        scheme: 'exact', network: 'eip155:84532', amount: '10000',
+        asset: ASSET, payTo: PAY_TO, maxTimeoutSeconds: 60,
+        extra: { name: 'USDC', version: '2' },
+      }],
+    };
+    let captured: { body?: { x402Version?: number; paymentPayload?: unknown; paymentRequirements?: Record<string, unknown> } } = {};
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      captured = { body: JSON.parse(String(init?.body ?? '{}')) };
+      return new Response(JSON.stringify({ success: false, error: 'insufficient_funds' }), { status: 400 });
+    };
+    const probe = makeFacilitatorDrainProbe('https://facil.example/settle', fetchImpl);
+    const payload = Buffer.from(JSON.stringify({ x402Version: 2, payload: { signature: '0xabc' } })).toString('base64');
+    const result = await probe(payload, reqs as never);
+    const body = captured.body!;
+    expect(body.x402Version).toBe(2);
+    expect(body.paymentRequirements?.scheme).toBe('exact'); // раньше было undefined (шлём accepts[0], не конверт)
+    expect(body.paymentRequirements?.network).toBe('eip155:84532');
+    expect(body.paymentRequirements?.payTo).toBe(PAY_TO);
+    expect(typeof body.paymentPayload).toBe('object'); // раскодированный объект, не Base64-строка
+    expect(result.settled).toBe(false);
+    expect(result.reason).toBe('insufficient_funds');
   });
 });
 

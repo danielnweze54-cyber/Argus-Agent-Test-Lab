@@ -109,9 +109,10 @@ export interface RunnerReport {
 /** Порядок «худшести» для агрегации вердиктов по попыткам. */
 const VERDICT_SEVERITY: Record<BlockBVerdict, number> = {
   PASS: 0,
-  ADVISORY: 1,
-  FAIL: 2,
-  HARNESS_ERROR: 3,
+  NOT_APPLICABLE: 1, // непрогнанный сценарий не должен маскироваться под PASS
+  ADVISORY: 2,
+  FAIL: 3,
+  HARNESS_ERROR: 4,
 };
 
 export function worstVerdict(verdicts: readonly BlockBVerdict[]): BlockBVerdict {
@@ -121,7 +122,9 @@ export function worstVerdict(verdicts: readonly BlockBVerdict[]): BlockBVerdict 
   );
 }
 
-/** Exit-код отчёта: HARNESS_ERROR/провал гейта → 2; есть FAIL → 1; иначе 0. */
+/** Exit-код отчёта: HARNESS_ERROR/провал гейта → 2; есть FAIL → 1; иначе 0.
+ *  NOT_APPLICABLE — не FAIL и не сбой (сценарий неприменим к СУТ): exit 0,
+ *  но в отчёте сценарий идёт отдельной строкой, не в доле PASS. */
 export function computeExitCode(report: RunnerReport): 0 | 1 | 2 {
   if (report.gate && !report.gate.passed) return 2;
   const verdicts = report.scenarios.map((s) => s.verdict);
