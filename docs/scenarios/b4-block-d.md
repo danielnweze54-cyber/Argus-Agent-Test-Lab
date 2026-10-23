@@ -31,7 +31,7 @@ First target rail: PayPal sandbox (SUT: `agentmiddleware/amw-paypal-agent-demo`)
 
 **Evidence boundary:** capture truth must come from the rail API or the proxy wire log, not from SUT claims alone. Harness-supplied observations must be labeled per the Block B evidence rule.
 
-**Current result:** DRAFT / NOT EXECUTABLE — scenario source and fault proxy are not part of this commit.
+**Current result:** EXECUTED LIVE (branch `paypal-fiat-rails`, mock-first rail). Verdict PASS 26/26 checks — `tools/paypal-adapter/evidence/block-d-s10-verdict.json`. Live chain: SUT (mini_gateway over TCP via `sut/serve_gateway.py`) → fault proxy :8888 → mock rail :8891, zero PayPal keys. See "Live run record" below.
 
 ## S11 — Over Budget
 
@@ -47,7 +47,7 @@ First target rail: PayPal sandbox (SUT: `agentmiddleware/amw-paypal-agent-demo`)
 
 **Evidence boundary:** rail-side absence-of-capture proof requires a rail/proxy query, not only absence of SUT logs; passive absence must not produce PASS by itself (R3-D3 semantics apply).
 
-**Current result:** DRAFT / NOT EXECUTABLE — scenario source is not part of this commit.
+**Current result:** EXECUTED LIVE (branch `paypal-fiat-rails`, mock-first rail). Verdict PASS 11/11 checks — `tools/paypal-adapter/evidence/block-d-s11-verdict.json`. Refusals are synchronous SUT-local (`-32001`, `permit_budget_exceeded` / `insufficient_funds`), boundary at exactly the limit is inclusive, and the only rail traffic belongs to the allowed boundary probe.
 
 ## Block D evidence rule
 
@@ -68,11 +68,25 @@ Confirmed from `demo.py` / `gateway.py` / `paypal_client.py`:
 - `GET /v1/billing/ledger/{wallet_id}` — wallet ledger entries (debit evidence for S11)
 - `GET /v1/receipts/{id}/portable` + `GET /.well-known/trust-keys.json` — signed receipt bundle + published key set (S10 receipt verification, offline-verifiable)
 - tool dispatch via the B2A SDK client (`tools/call` surface); `PayPal-Request-Id` carries the AMW idempotency key with `create`/`capture` suffixes — rail-side idempotency is addressable per AMW key
-- `paypal_client.py` reads `PAYPAL_BASE_URL` from env → the SUT can be pointed at the fault proxy without any demo patch
+- `paypal_client.py` reads `PAYPAL_BASE_URL` from env, but rejects any non-`https` / non-`paypal.com` host unless an explicit `transport` is injected (its own declared test seam). Block D uses that seam: `sut/serve_gateway.py` constructs `PayPalClient(base_url=<proxy>, transport=httpx.AsyncHTTPTransport())`. No demo code is modified.
 
 Mapping to the demo's own self-played scenes (context only, not trusted as verdicts):
 
 - Demo Scene 2 ("lost response", via in-process `LostResponseTransport` over ASGI) ↔ S10. The demo verifies itself; Argus re-establishes the same loss deterministically on the real wire and renders an independent verdict.
 - Demo Scene 3 ("over budget") ↔ S11. Same boundary: self-check vs black-box proof.
 
-Integration item for the live run: the demo gateway is currently served in-process (`ASGITransport`, base_url `http://amw`). External black-box driving requires the same app over TCP (uvicorn shim or a `--serve` flag on the SUT side). Until then, Block D driver runs are replay-based (see `src/tests/BlockD-S10-S11.test.ts`).
+Integration item resolved: the demo gateway is served over TCP by `tools/paypal-adapter/sut/serve_gateway.py` (uvicorn shim around the SUT's own `MiniGateway.app`; deployment plumbing, not a repair). Black-box runs: `tools/paypal-adapter/src/run-s10.mjs`, `run-s11.mjs` (driver toolkit in `src/driver.mjs`). Replay-based verdict logic: `src/tests/BlockD-S10-S11.test.ts`.
+
+## Live run record (2026-10-24, mock-first rail)
+
+Setup: SUT `agentmiddleware/amw-paypal-agent-demo` @ HEAD, mini_gateway served on 127.0.0.1:8321, fault proxy :8888, mock rail :8891, price $25.00 (2500 credits), Ed25519 receipts (`argus-block-d-sut` key id).
+
+**S10 DeliveryUncertain — PASS 26/26.** Three phases:
+
+1. *Idempotent retry recovers.* Capture response dropped twice (arm `lost_response_after_capture` ×2). The SUT retried the capture with the same `PayPal-Request-Id`; the rail replayed the original 201 (capture_attempts=2, captures_completed=1, capture_replays=1). SUT resolved success, one wallet debit, zero refunds.
+2. *Full blackout.* Capture ×2 dropped AND the reconciliation GET dropped. The SUT refunded the wallet (`tool_error` receipt, charged 0) while the rail HAD captured. **Finding F2 (SUT-side):** in the unrecoverable-ambiguity branch the demo refunds a capture that actually settled — rail and ledger diverge by $25. Not repaired, only reported.
+3. *Delivery uncertain.* Capture ×2 dropped, reconciliation GET stalled (arm `timeout` 6 s), driver aborted the MCP call mid-flight. In-process cancellation did not surface uncertainty (uvicorn did not cancel the handler); the driver fell back to the documented crash-recovery path (hard kill → restart with same db → `recover()` marked the stale in-flight op). Retry with the SAME idempotency key returned the stored envelope: JSON-RPC error `-32010` / `delivery_uncertain` with a signed receipt (`credits_charged` kept, outcome `delivery_uncertain`), verified through the SUT's own `POST /v1/receipts/verify` (valid=true). Rail frozen at 3 captures / 6 attempts — the retry dispatched nothing.
+
+**S11 OverBudget — PASS 11/11.** Refusal before charge at cap < price; boundary at cap == price is inclusive and completes with exactly one debit + one capture; zero rail traffic for every refused probe.
+
+**Finding F1 (Argus tooling, fixed on this branch):** the mock rail initially (a) answered a same-`PayPal-Request-Id` capture retry with 422 instead of replaying the original response, and (b) served the capture outside `purchase_units[0].payments.captures[]`, which the SUT's reconcile path (`paypal_tool._first_capture`) requires. Both fixed — the mock must mirror the rail's real contract, otherwise the SUT is punished for the mock's fidelity, not its own behavior.

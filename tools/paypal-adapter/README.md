@@ -31,24 +31,37 @@ Run the loop:
 node mock-rail/paypal-mock.mjs    # fake PayPal Orders v2, :8891
 node proxy/fault-proxy.mjs        # fault injector, :8888 -> :8891
 
-# SUT side: point the demo at the proxy instead of PayPal sandbox
-#   PAYPAL_BASE_URL=http://127.0.0.1:8888
-# (paypal_client.py reads PAYPAL_BASE_URL from env; no demo patch needed)
+# SUT side (deployment plumbing, no demo patch):
+#   python3 sut/serve_gateway.py --demo-root /path/to/amw-paypal-agent-demo \
+#       --port 8321 --proxy-url http://127.0.0.1:8888 --price-usd 25.00
+# The shim serves the demo's own MiniGateway over TCP (uvicorn) and constructs
+# PayPalClient with an explicit transport pointed at the proxy: paypal_client.py
+# refuses plain-HTTP / non-paypal.com base URLs without a transport, so the
+# transport parameter (its own declared test seam) is the intended entry point.
 ```
 
 The mock rail speaks the same surface as the sandbox: `POST /v1/oauth2/token`,
 `POST /v2/checkout/orders` (idempotent by `PayPal-Request-Id`),
-`POST /v2/checkout/orders/{id}/capture` (at most one; second attempt -> 422
-`ORDER_ALREADY_CAPTURED`), `GET /v2/checkout/orders/{id}` (reconciliation polling).
+`POST /v2/checkout/orders/{id}/capture` (at most one; a retry with the SAME
+`PayPal-Request-Id` replays the original 201 — real PayPal idempotency — while
+a different request id on a captured order gets 422 `ORDER_ALREADY_CAPTURED`),
+`GET /v2/checkout/orders/{id}` (reconciliation polling; the capture is served
+inside `purchase_units[0].payments.captures[]`, as PayPal serves it).
 Rail-side truth for assertions: `GET /__rail/evidence`.
 
 Arm the S10 fault and read evidence (Argus drives these):
 
 ```bash
 curl -X POST localhost:8888/__argus/arm -H 'Content-Type: application/json' \
-  -d '{"scenario":"lost_response_after_capture","method":"POST","pathSuffix":"/capture","times":1}'
+  -d '{"scenario":"lost_response_after_capture","method":"POST","pathSuffix":"/capture","times":2}'
+curl -X POST localhost:8888/__argus/arm -H 'Content-Type: application/json' \
+  -d '{"scenario":"timeout","method":"GET","pathSuffix":"","times":1,"timeoutMs":6000}'
 curl localhost:8888/__argus/wire-log
 ```
+
+Arms are additive (several live at once; every request consumes the first
+matching arm). `pathSuffix: ""` matches any path — use it for GET faults, the
+default suffix is `/capture`.
 
 `lost_response_after_capture` forwards the capture upstream, waits for the rail to
 complete it (201), then destroys the SUT socket without sending the response —
@@ -62,8 +75,12 @@ transit without forwarding.
 
 ## Status
 
-DRAFT — scaffold + working mock-first loop. The S10 loss mechanism is verified by
-`scripts/smoke-block-d.sh` (token/order/capture through the proxy, armed response
-drop, rail-side truth, duplicate-capture rejection, wire-log entry). Next:
-Argus-side adapter + S10/S11 scenario sources on this branch. No changes to
-Blocks A/B/C, ScenarioRegistry, or verdict semantics.
+EXECUTED LIVE (mock-first rail): S10 PASS 26/26, S11 PASS 11/11 — see the live
+run record in `docs/scenarios/b4-block-d.md` and the verdict JSONs in
+`evidence/`. Findings: F1 (Argus tooling, fixed — mock replay + capture
+embedding), F2 (SUT-side, reported — the demo refunds a settled capture in the
+unrecoverable-ambiguity branch; rail/ledger divergence). Black-box runs:
+`node src/run-s10.mjs`, `node src/run-s11.mjs` (start rail + proxy first; the
+run scripts spawn the SUT shim themselves). Next: real sandbox keys on the SUT
+side, then Alipay. No changes to Blocks A/B/C, ScenarioRegistry, or verdict
+semantics.

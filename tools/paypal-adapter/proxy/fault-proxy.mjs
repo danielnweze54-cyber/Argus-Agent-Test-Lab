@@ -4,12 +4,13 @@
 // Forwards all traffic to the upstream; admin routes under /__argus/ let Argus
 // arm deterministic wire faults and read the wire log as rail-side evidence.
 //
-// Faults:
+// Faults (each POST /__argus/arm adds one arm; several arms can be live at
+// once — every request consumes at most the FIRST matching arm):
 //   lost_response_after_capture — forwards the request upstream, waits for the
 //     upstream response, then destroys the SUT socket WITHOUT sending the
 //     response. The capture completes upstream; the SUT sees a lost response.
-//   timeout — destroys the SUT socket after FAULT_PROXY_TIMEOUT_MS without
-//     forwarding anything (request lost in transit).
+//   timeout — destroys the SUT socket after arm.timeoutMs (or
+//     FAULT_PROXY_TIMEOUT_MS) without forwarding anything.
 //
 // No dependencies. Node >= 18.
 
@@ -23,10 +24,12 @@ const TIMEOUT_MS = Number(process.env.FAULT_PROXY_TIMEOUT_MS ?? 5000);
 const UP_LIB = UPSTREAM.protocol === 'https:' ? https : http;
 
 const state = {
-  armed: null, // {scenario, method, pathSuffix, times}
+  arms: [],    // active arms: {scenario, method, pathSuffix, times, timeoutMs}
   wire: [],    // ring buffer of wire-log entries (S10/S11 evidence)
   seq: 0,
 };
+
+let armSeq = 0;
 
 function logWire(entry) {
   state.wire.push({ seq: ++state.seq, ts: new Date().toISOString(), ...entry });
@@ -48,21 +51,22 @@ function sendJson(res, code, obj) {
   res.end(body);
 }
 
-function armMatches(req, url) {
-  const a = state.armed;
-  if (!a) return false;
-  if (a.method && req.method !== a.method) return false;
-  if (a.pathSuffix && !url.pathname.endsWith(a.pathSuffix)) return false;
-  return true;
+// First live arm matching this request, or null.
+function findArm(req, url) {
+  return (
+    state.arms.find(
+      (a) =>
+        a.times > 0 &&
+        (!a.method || req.method === a.method) &&
+        (!a.pathSuffix || url.pathname.endsWith(a.pathSuffix))
+    ) ?? null
+  );
 }
 
-// Returns the armed fault (and decrements/retires it) or null.
-function consumeArm() {
-  const a = state.armed;
-  if (!a) return null;
-  a.times -= 1;
-  if (a.times <= 0) state.armed = null;
-  return a;
+function consumeArm(arm) {
+  arm.times -= 1;
+  if (arm.times <= 0) state.arms = state.arms.filter((x) => x !== arm);
+  return arm;
 }
 
 async function admin(req, res, url) {
@@ -72,28 +76,32 @@ async function admin(req, res, url) {
     if (!['lost_response_after_capture', 'timeout'].includes(scenario)) {
       return sendJson(res, 400, { error: 'unknown scenario', supported: ['lost_response_after_capture', 'timeout'] });
     }
-    state.armed = {
+    const arm = {
+      id: `arm-${++armSeq}`,
       scenario,
       method: body.method ?? 'POST',
       pathSuffix: body.pathSuffix ?? '/capture',
       times: Number(body.times ?? 1),
+      timeoutMs: body.timeoutMs != null ? Number(body.timeoutMs) : undefined,
     };
-    logWire({ kind: 'admin', action: 'arm', armed: state.armed });
-    return sendJson(res, 200, { ok: true, armed: state.armed });
+    state.arms.push(arm);
+    logWire({ kind: 'admin', action: 'arm', armed: arm });
+    return sendJson(res, 200, { ok: true, armed: arm, arms: state.arms });
   }
   if (req.method === 'POST' && url.pathname === '/__argus/disarm') {
-    state.armed = null;
+    state.arms = [];
     logWire({ kind: 'admin', action: 'disarm' });
     return sendJson(res, 200, { ok: true, armed: null });
   }
   if (req.method === 'GET' && url.pathname === '/__argus/status') {
-    return sendJson(res, 200, { armed: state.armed, upstream: UPSTREAM.toString(), wire_entries: state.wire.length });
+    return sendJson(res, 200, { arms: state.arms, upstream: UPSTREAM.toString(), wire_entries: state.wire.length });
   }
   if (req.method === 'GET' && url.pathname === '/__argus/wire-log') {
     return sendJson(res, 200, { entries: state.wire });
   }
   if (req.method === 'POST' && url.pathname === '/__argus/reset') {
     state.wire = [];
+    state.arms = [];
     return sendJson(res, 200, { ok: true });
   }
   return sendJson(res, 404, { error: 'unknown admin route' });
@@ -107,13 +115,14 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  const armed = armMatches(req, url);
+  const armed = findArm(req, url);
 
   // timeout fault: request never reaches the rail
   if (armed && armed.scenario === 'timeout') {
-    const a = consumeArm();
-    logWire({ kind: 'wire', method: req.method, path: url.pathname + url.search, fault: a.scenario, note: `socket destroyed after ${TIMEOUT_MS}ms, request not forwarded` });
-    setTimeout(() => res.destroy(), TIMEOUT_MS);
+    const a = { ...consumeArm(armed) };
+    const ms = a.timeoutMs ?? TIMEOUT_MS;
+    logWire({ kind: 'wire', method: req.method, path: url.pathname + url.search, fault: a.scenario, arm: a.id, note: `socket destroyed after ${ms}ms, request not forwarded` });
+    setTimeout(() => res.destroy(), ms);
     req.resume();
     return;
   }
@@ -126,10 +135,10 @@ const server = http.createServer((req, res) => {
       upRes.on('data', (c) => chunks.push(c));
       upRes.on('end', () => {
         if (armed) {
-          const a = consumeArm();
-          if (a && a.scenario === 'lost_response_after_capture') {
-            logWire({ kind: 'wire', method: req.method, path: url.pathname + url.search, upstream_status: upRes.statusCode, fault: a.scenario, note: 'upstream completed; response dropped, SUT socket destroyed' });
-            res.destroy(); // S10: capture happened, response is lost
+          const a = { ...consumeArm(armed) };
+          if (a.scenario === 'lost_response_after_capture') {
+            logWire({ kind: 'wire', method: req.method, path: url.pathname + url.search, upstream_status: upRes.statusCode, fault: a.scenario, arm: a.id, note: 'upstream completed; response dropped, SUT socket destroyed' });
+            res.destroy(); // S10: rail acted, response is lost
             return;
           }
         }
