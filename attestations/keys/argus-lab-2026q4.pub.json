@@ -1,0 +1,11 @@
+{
+  "key_id": "argus-lab-2026q4",
+  "algorithm": "Ed25519",
+  "created_at": "2026-10-23T21:19:09.877Z",
+  "purpose": "Signs Argus registry records (seals and finding records). Verify with tools/registry/verify-registry.mjs.",
+  "public_jwk": {
+    "crv": "Ed25519",
+    "x": "nu_DEejJZuTzwvYUujsOwhNznZVO9pqV5ltXvmjhulo",
+    "kty": "OKP"
+  }
+}

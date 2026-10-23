@@ -1,0 +1,67 @@
+{
+  "seq": "0001",
+  "record_id": "argus-seal-0001",
+  "issued_at": "2026-10-23T21:19:09.949Z",
+  "signer_key_id": "argus-lab-2026q4",
+  "prev_record_hash": "735eae3bf24a419f25b81a70992109cab9684a5c1ca86f0c93036e089e2a50c3",
+  "type": "seal",
+  "title": "Block D live run — S10/S11 against amw-paypal-agent-demo",
+  "subject": {
+    "repo": "agentmiddleware/amw-paypal-agent-demo",
+    "commit": "60887d8",
+    "sut_note": "SUT served unmodified over its declared transport seam; faults were wire-level and Argus-owned",
+    "lab_run_commit": "099e1f73"
+  },
+  "scenarios": [
+    {
+      "id": "S10",
+      "name": "DeliveryUncertain",
+      "verdict": "PASS",
+      "checks": "26/26",
+      "findings": [
+        "F2"
+      ]
+    },
+    {
+      "id": "S11",
+      "name": "OverBudget",
+      "verdict": "PASS",
+      "checks": "11/11",
+      "findings": []
+    }
+  ],
+  "run_ts": "2026-10-23T19:02:42Z",
+  "self_run": true,
+  "findings_summary": [
+    {
+      "id": "F2",
+      "severity": "high",
+      "title": "SUT refunds a settled capture under full blackout (rail/ledger $25 divergence)",
+      "writeup": "docs/scenarios/b4-block-d-findings.md"
+    }
+  ],
+  "evidence": [
+    {
+      "kind": "file",
+      "path": "tools/paypal-adapter/evidence/2026-10-23-live-run/block-d-s10-verdict.json",
+      "sha256": "621afb2a5aa1c90b256c557f04517257e8cee41724e4342f62beeb2025be20be"
+    },
+    {
+      "kind": "file",
+      "path": "tools/paypal-adapter/evidence/2026-10-23-live-run/block-d-s11-verdict.json",
+      "sha256": "536b274704def01bac913ced3d4a1c1e54aa648759bd0086794e8d236c4162ce"
+    },
+    {
+      "kind": "file",
+      "path": "tools/paypal-adapter/evidence/2026-10-23-live-run/sut-s10-ledger.sqlite",
+      "sha256": "2c7e9daa767771bc30a949624223c34319f8a72ebf0c569c1244ccb1a8d49494"
+    },
+    {
+      "kind": "file",
+      "path": "tools/paypal-adapter/evidence/2026-10-23-live-run/sut-s11-ledger.sqlite",
+      "sha256": "cb8b05b8ed1161b04ed6d223cd073457afc0abe78266dc96b8590b67244c3597"
+    }
+  ],
+  "notes": "Self-attestation (the lab's own run against a third-party demo). The seal attests run validity and findings completeness — NOT bug-freeness. Finding F2 is attached and was reported to the SUT vendor.",
+  "signature": "gxNFYL4134Gort7yLUdMyVUI/dCHK/PfKABRbEDfQLAOpHQrG9LJYeVsIDgY4JcyiwySzXGqvOU6mME9STtuAQ=="
+}
