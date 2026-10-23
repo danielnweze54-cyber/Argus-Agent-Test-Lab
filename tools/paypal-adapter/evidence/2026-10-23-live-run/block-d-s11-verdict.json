@@ -1,0 +1,102 @@
+{
+  "scenario": "S11 OverBudget",
+  "sut": "agentmiddleware/amw-paypal-agent-demo (mini_gateway over TCP)",
+  "rail": "Argus mock PayPal rail (mock-first loop)",
+  "price_usd": "25.00",
+  "checks": [
+    {
+      "name": "P1: refused (JSON-RPC error -32001)",
+      "pass": true,
+      "detail": {
+        "expected": -32001,
+        "actual": -32001
+      }
+    },
+    {
+      "name": "P1: refusal reason is budget/permit denial",
+      "pass": true,
+      "detail": "permit_budget_exceeded"
+    },
+    {
+      "name": "P1: wallet balance untouched",
+      "pass": true,
+      "detail": {
+        "expected": "1250",
+        "actual": "1250"
+      }
+    },
+    {
+      "name": "P1: no charge entries",
+      "pass": true,
+      "detail": {
+        "expected": 0,
+        "actual": 0
+      }
+    },
+    {
+      "name": "P2: refused at boundary-1",
+      "pass": true,
+      "detail": {
+        "expected": -32001,
+        "actual": -32001
+      }
+    },
+    {
+      "name": "P3: not refused at boundary",
+      "pass": true,
+      "detail": {
+        "expected": false,
+        "actual": false
+      }
+    },
+    {
+      "name": "P3: receipt outcome",
+      "pass": true,
+      "detail": {
+        "expected": "success",
+        "actual": "success"
+      }
+    },
+    {
+      "name": "rail: orders created only by the allowed probe",
+      "pass": true,
+      "detail": {
+        "expected": 1,
+        "actual": 1
+      }
+    },
+    {
+      "name": "rail: captures completed only by the allowed probe",
+      "pass": true,
+      "detail": {
+        "expected": 1,
+        "actual": 1
+      }
+    },
+    {
+      "name": "rail: zero capture attempts below the boundary",
+      "pass": true,
+      "detail": {
+        "expected": 1,
+        "actual": 1
+      }
+    },
+    {
+      "name": "wire: no rail traffic before refusals (refusal is SUT-local)",
+      "pass": true,
+      "detail": {
+        "expected": 2,
+        "actual": 2
+      }
+    }
+  ],
+  "verdict": "PASS",
+  "rail_evidence": {
+    "tokens_issued": 1,
+    "orders_created": 1,
+    "capture_attempts": 1,
+    "captures_completed": 1,
+    "capture_replays": 0,
+    "duplicate_capture_rejections": 0
+  }
+}
