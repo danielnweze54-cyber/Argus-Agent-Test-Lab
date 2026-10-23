@@ -58,3 +58,21 @@ Block D adds no repairs to Blocks A/B/C and changes no verdict semantics.
 ## Adapter boundary
 
 The PayPal adapter (`tools/paypal-adapter`) speaks to the SUT's gateway HTTP surface and, in real-rail mode, routes SUT traffic through the fault proxy to the sandbox. Sandbox credentials belong to the SUT side (see `tools/paypal-adapter/.env.example`).
+
+## SUT surface (discovered, agentmiddleware/amw-paypal-agent-demo)
+
+Confirmed from `demo.py` / `gateway.py` / `paypal_client.py`:
+
+- `POST /v1/billing/wallets/sponsor`, `POST /v1/billing/wallets/agent` — provisioning; agent wallets carry budget credits / daily limits (S11 hook)
+- `POST /v1/api-keys` — agent key issuance; auth via `X-API-Key`
+- `GET /v1/billing/ledger/{wallet_id}` — wallet ledger entries (debit evidence for S11)
+- `GET /v1/receipts/{id}/portable` + `GET /.well-known/trust-keys.json` — signed receipt bundle + published key set (S10 receipt verification, offline-verifiable)
+- tool dispatch via the B2A SDK client (`tools/call` surface); `PayPal-Request-Id` carries the AMW idempotency key with `create`/`capture` suffixes — rail-side idempotency is addressable per AMW key
+- `paypal_client.py` reads `PAYPAL_BASE_URL` from env → the SUT can be pointed at the fault proxy without any demo patch
+
+Mapping to the demo's own self-played scenes (context only, not trusted as verdicts):
+
+- Demo Scene 2 ("lost response", via in-process `LostResponseTransport` over ASGI) ↔ S10. The demo verifies itself; Argus re-establishes the same loss deterministically on the real wire and renders an independent verdict.
+- Demo Scene 3 ("over budget") ↔ S11. Same boundary: self-check vs black-box proof.
+
+Integration item for the live run: the demo gateway is currently served in-process (`ASGITransport`, base_url `http://amw`). External black-box driving requires the same app over TCP (uvicorn shim or a `--serve` flag on the SUT side). Until then, Block D driver runs are replay-based (see `src/tests/BlockD-S10-S11.test.ts`).
