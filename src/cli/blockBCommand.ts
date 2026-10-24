@@ -36,7 +36,7 @@ import type { BlockBScenarioSpec } from '../blockb/BlockBScenario';
 import { PassthroughPaymentFaultInjector } from '../blockb/PaymentFaultInjector';
 import { createBcRunner, type PaymentSigner } from '../blockb/runners/BcRunner';
 import { makeFacilitatorDrainProbe } from '../blockb/runners/FacilitatorDrainProbe';
-import { BsRunner } from '../blockb/runners/BsRunner';
+import { BsRunner, type RequirementOverride } from '../blockb/runners/BsRunner';
 import { runBlockBGate } from '../blockb/runners/BlockBGate';
 import {
   AutoFundingProvider,
@@ -77,6 +77,9 @@ interface BlockBFlags {
   /** Пробы S-BS-06 (follow-up #3866): суммы requirements на каждый 402-контакт,
    *  через запятую ('10000,100000'; последний повторяется). BS-семейство. */
   requirementAmounts?: string;
+  /** Батарея биндинга S-BS-06 (раунд 2): JSON-массив пер-контактных оверрайдов
+   *  полей requirements [{amount?,payTo?,asset?,network?,scheme?}, ...]. */
+  requirementOverrides?: string;
 }
 
 const USAGE = [
@@ -89,6 +92,7 @@ const USAGE = [
   '       --facilitator-settle-url URL (S-BC-14 frontrun-drain: settle фасилитатора СУТ)',
   '       --funding auto|manual --faucet-url URL --rpc-url URL [--funding-min-atomic N] (BC, решение В3)',
   '       --requirement-amounts A1,A2 (BS S-BS-06 probes: sums per 402 contact; env ARGUS_B_REQUIREMENT_AMOUNTS)',
+  '       --requirement-overrides \'<json>\' (BS S-BS-06 binding battery: per-contact field overrides; env ARGUS_B_REQUIREMENT_OVERRIDES)',
   'Env:   ARGUS_B_SUT_URL, ARGUS_B_BIND, ARGUS_TEST_WALLET_PRIVATE_KEY,',
   '       ARGUS_B_FACILITATOR_SETTLE_URL, ARGUS_B_FUNDING, ARGUS_B_FAUCET_URL, ARGUS_B_RPC_URL',
 ].join('\n');
@@ -166,6 +170,9 @@ export function parseBlockBArgs(argv: string[]): BlockBFlags {
       case '--requirement-amounts':
         flags.requirementAmounts = next();
         break;
+      case '--requirement-overrides':
+        flags.requirementOverrides = next();
+        break;
       default:
         throw new Error(`Unknown flag '${flag}'\n${USAGE}`);
     }
@@ -192,6 +199,44 @@ export function parseAmountsList(raw: string | undefined): readonly string[] | u
     }
   }
   return parts;
+}
+
+/**
+ * Батарея биндинга S-BS-06 (раунд 2): '[{"payTo":"0x..."},{"asset":"0x..."}]' →
+ * массив пер-контактных оверрайдов. Пустые объекты и undefined-поля допустимы
+ * (без изменений). Валидация: только известные поля, строки.
+ */
+export function parseRequirementOverrides(
+  raw: string | undefined
+): readonly (RequirementOverride | undefined)[] | undefined {
+  if (!raw) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`--requirement-overrides: ожидался JSON-массив оверрайдов, получено '${raw}'`);
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`--requirement-overrides: ожидался JSON-массив оверрайдов, получено '${raw}'`);
+  }
+  const allowed = new Set(['amount', 'payTo', 'asset', 'network', 'scheme']);
+  return parsed.map((entry) => {
+    if (entry === null) return undefined;
+    if (typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`--requirement-overrides: элемент должен быть объектом или null, получено ${JSON.stringify(entry)}`);
+    }
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(entry as Record<string, unknown>)) {
+      if (!allowed.has(k)) {
+        throw new Error(`--requirement-overrides: неизвестное поле '${k}' (допустимо: ${[...allowed].join(', ')})`);
+      }
+      if (v !== undefined && v !== null && typeof v !== 'string') {
+        throw new Error(`--requirement-overrides: поле '${k}' должно быть строкой`);
+      }
+      if (typeof v === 'string') out[k] = v;
+    }
+    return Object.keys(out).length > 0 ? (out as RequirementOverride) : undefined;
+  });
 }
 
 /** Подписант честного/плохого клиента на ключе оператора (viem). */
@@ -600,6 +645,9 @@ async function runBsScenario(
       resourcePrice: flags.price,
       oversizeSequence: parseAmountsList(
         flags.requirementAmounts ?? process.env.ARGUS_B_REQUIREMENT_AMOUNTS
+      ),
+      requirementOverrides: parseRequirementOverrides(
+        flags.requirementOverrides ?? process.env.ARGUS_B_REQUIREMENT_OVERRIDES
       ),
       observeWindowMs: flags.observeWindowMs,
       firstRequestTimeoutMs: flags.firstRequestTimeoutMs,

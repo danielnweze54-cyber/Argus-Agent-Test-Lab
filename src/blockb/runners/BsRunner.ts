@@ -43,6 +43,17 @@ import type { BsReceivedPayment, BsSessionRecord } from './BlockBRunnerTypes';
 /** Атакующий payTo для S-BS-05 (валидный 0x-адрес, НЕ канонический получатель). */
 const ATTACKER_PAYTO = '0x6666666666666666666666666666666666666666';
 
+/** Батарея биндинга S-BS-06 (follow-up #3866, раунд 2): пер-контактный оверрайд
+ *  ПОЛЕЙ requirements. undefined поле — без изменения. Индекс = 402-контакт
+ *  по порядку (последний элемент повторяется; пустой слот = без изменений). */
+export interface RequirementOverride {
+  readonly amount?: string;
+  readonly payTo?: string;
+  readonly asset?: string;
+  readonly network?: string;
+  readonly scheme?: string;
+}
+
 export interface BsRunnerOptions {
   readonly runConfig: BlockBRunConfig & { family: 'BS' };
   readonly scenario: BlockBScenarioSpec;
@@ -51,6 +62,10 @@ export interface BsRunnerOptions {
   /** Пробы S-BS-06 (follow-up #3866): суммы requirements на каждый 402-контакт
    *  по порядку (последний элемент повторяется). Не задана — легаси price×10. */
   readonly oversizeSequence?: readonly string[];
+  /** Батарея биндинга S-BS-06: пер-контактные оверрайды полей (payTo/asset/
+   *  network/scheme/amount) — проверка заявленного биндинга quote-ledger.
+   *  Индексация как у oversizeSequence: последний элемент повторяется. */
+  readonly requirementOverrides?: readonly (RequirementOverride | undefined)[];
   /** Окно наблюдения после первого платежа, мс (дефолт 2000; CLI — 120000). */
   readonly observeWindowMs?: number;
   /** Ожидание первого запроса СУТ, мс (дефолт 30000). */
@@ -65,6 +80,8 @@ interface BsSessionInternal {
   oversizeAmount: string;
   oversize402Count: number;
   requirementsServed: string[];
+  /* Батарея биндинга S-BS-06: полный лог выданных требований (поле-уровень). */
+  requirementDetails: Array<Record<string, string | undefined>>;
   /* Факты сценариев волны 2 (заполняются скриптами). */
   verifyRejections: number;
   resourceEchoMismatch: boolean;
@@ -174,6 +191,7 @@ export class BsRunner {
       oversizeAmount: (BigInt(price) * 10n).toString(),
       oversize402Count: 0,
       requirementsServed: [],
+      requirementDetails: [],
       verifyRejections: 0,
       resourceEchoMismatch: false,
       prematureReceiptServed: false,
@@ -221,6 +239,15 @@ export class BsRunner {
     }
   }
 
+  /** Оверрайд по индексу 402-контакта (последний элемент повторяется; пустой
+   *  слот или undefined — без изменений). */
+  private nextOverride(contactIndex: number): RequirementOverride | undefined {
+    const seq = this.options.requirementOverrides;
+    if (!seq || seq.length === 0) return undefined;
+    const idx = Math.min(contactIndex, seq.length - 1);
+    return seq[idx];
+  }
+
   /**
    * Сумма следующего 402 slug'а oversize-amount: пробы с секвенцией сумм
    * (последний элемент повторяется) или легаси price×10.
@@ -258,6 +285,11 @@ export class BsRunner {
       ...(session.requirementsServed.length > 0
         ? { requirementsServed: [...session.requirementsServed] }
         : {}),
+      ...(session.requirementDetails.some((d) =>
+        Object.values(d).some((v) => v !== undefined)
+      )
+        ? { requirementDetails: session.requirementDetails.map((d) => ({ ...d })) }
+        : {}),
     };
   }
 
@@ -286,13 +318,26 @@ export class BsRunner {
             }
             const amount =
               slug === 'oversize-amount' ? this.nextOversizeAmount(session, price) : price;
-            session.requirementsServed.push(amount);
-            const payTo = slug === 'payto-substitution' ? ATTACKER_PAYTO : undefined;
+            const contactIndex = session.requirementsServed.length;
+            const ov = this.nextOverride(contactIndex);
+            const effAmount = ov?.amount ?? amount;
+            session.requirementsServed.push(effAmount);
+            session.requirementDetails.push({
+              amount: effAmount,
+              payTo: ov?.payTo,
+              asset: ov?.asset,
+              network: ov?.network,
+              scheme: ov?.scheme,
+            });
+            const payTo = ov?.payTo ?? (slug === 'payto-substitution' ? ATTACKER_PAYTO : undefined);
             const description =
               slug === 'oversize-amount'
                 ? `canonical resource, real price ${price} atomic units`
                 : 'canonical block-b resource';
-            const reqs = buildRequirements(resourceUrl, amount, description, { payTo });
+            const reqs = buildRequirements(resourceUrl, effAmount, description, { payTo });
+            if (ov?.asset) reqs.accepts[0]!.asset = ov.asset;
+            if (ov?.network) reqs.accepts[0]!.network = ov.network;
+            if (ov?.scheme) reqs.accepts[0]!.scheme = ov.scheme;
             res.writeHead(402, {
               'Content-Type': 'application/json',
               'payment-required': base64(reqs),

@@ -28,7 +28,12 @@
  *   EVM_PRIVATE_KEY        SUT client wallet key (testnet one-shot, unfunded)
  *   RESOURCE_SERVER_URL    base URL of the payment-demanding server
  *   ENDPOINT_PATH          resource path (default /weather)
- *   REQUEST_CYCLES         number of full request cycles (default 1)
+ *   ENDPOINT_SEQUENCE      per-cycle request targets, comma-separated
+ *                          "METHOD /path" or "/path" (GET implied); overrides
+ *                          ENDPOINT_PATH; cycles default to entries count —
+ *                          binding-battery probe for resource/method changes
+ *   REQUEST_CYCLES         number of full request cycles (default 1, or the
+ *                          ENDPOINT_SEQUENCE length when the sequence is set)
  *   SUT_CLIENT_MODE        observe | control (default observe)
  *   EXPECTED_PRICE_ATOMIC  caller-side price expectation (control mode)
  *   CLIENT_EVENT_LOG       JSONL event log path (also mirrored to stdout)
@@ -46,8 +51,33 @@ config();
 const evmPrivateKey = process.env.EVM_PRIVATE_KEY as `0x${string}` | undefined;
 const baseURL = process.env.RESOURCE_SERVER_URL || "http://127.0.0.1:4401";
 const endpointPath = process.env.ENDPOINT_PATH || "/weather";
+
+/** Батарея биндинга: per-cycle targets из ENDPOINT_SEQUENCE (последний
+ *  элемент повторяется; пусто — единственная цель из ENDPOINT_PATH). */
+interface CycleTarget {
+  method: string;
+  path: string;
+}
+
+function parseEndpointSequence(raw: string | undefined): CycleTarget[] | undefined {
+  if (!raw) return undefined;
+  const entries = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (entries.length === 0) return undefined;
+  return entries.map((entry) => {
+    const m = /^(GET|POST|PUT|DELETE|PATCH)\s+(\/.*)$/i.exec(entry);
+    return m ? { method: m[1]!.toUpperCase(), path: m[2]! } : { method: "GET", path: entry };
+  });
+}
+
+const endpointSequence = parseEndpointSequence(process.env.ENDPOINT_SEQUENCE);
 const url = `${baseURL}${endpointPath}`;
-const cycles = Number.parseInt(process.env.REQUEST_CYCLES || "1", 10);
+const cycles = Number.parseInt(
+  process.env.REQUEST_CYCLES || String(endpointSequence?.length ?? 1),
+  10,
+);
 const mode = (process.env.SUT_CLIENT_MODE || "observe").toLowerCase();
 const expectedPrice = process.env.EXPECTED_PRICE_ATOMIC || undefined;
 const eventLogPath = process.env.CLIENT_EVENT_LOG || undefined;
@@ -100,6 +130,22 @@ interface BoundRequirement {
 
 const quoteLedger = new Map<string, BoundRequirement>();
 
+/** Текущая цель цикла (url/method запроса СУТ). */
+let currentTarget: { url: string; method: string } = {
+  url: `${baseURL}${endpointSequence?.[0]?.path ?? endpointPath}`,
+  method: endpointSequence?.[0]?.method ?? "GET",
+};
+
+/** Цель для цикла c (1-based): ENDPOINT_SEQUENCE, последний элемент повторяется. */
+function targetForCycle(cycle: number): { url: string; method: string } {
+  const seq = endpointSequence;
+  if (!seq || seq.length === 0) {
+    return { url: `${baseURL}${endpointPath}`, method: "GET" };
+  }
+  const idx = Math.min(cycle - 1, seq.length - 1);
+  return { url: `${baseURL}${seq[idx]!.path}`, method: seq[idx]!.method };
+}
+
 const eq = (a: unknown, b: unknown): boolean =>
   String(a ?? "").toLowerCase() === String(b ?? "").toLowerCase();
 
@@ -135,7 +181,15 @@ function extractBound(body: unknown): BoundRequirement {
     accepts?: { scheme?: string; network?: string; amount?: string; asset?: string; payTo?: string }[];
   };
   const a = reqs?.accepts?.[0] ?? {};
-  return { url, method: "GET", scheme: a.scheme, network: a.network, amount: a.amount, asset: a.asset, payTo: a.payTo };
+  return {
+    url: currentTarget.url,
+    method: currentTarget.method,
+    scheme: a.scheme,
+    network: a.network,
+    amount: a.amount,
+    asset: a.asset,
+    payTo: a.payTo,
+  };
 }
 
 async function main(): Promise<void> {
@@ -150,8 +204,8 @@ async function main(): Promise<void> {
     async (args: Record<string, unknown>): Promise<string> => {
       const message = (args.message ?? {}) as Record<string, unknown>;
       const bound: BoundRequirement = {
-        url,
-        method: "GET",
+        url: currentTarget.url,
+        method: currentTarget.method,
         payTo: String(message.to ?? ""),
         amount: message.value !== undefined ? BigInt(String(message.value)).toString() : undefined,
       };
@@ -215,7 +269,7 @@ async function main(): Promise<void> {
       try {
         const body = await res.clone().json();
         lastOffered = extractBound(body);
-        emit({ type: "quote_offered", cycle_context_url: url, requirements: body });
+        emit({ type: "quote_offered", cycle_context_url: currentTarget.url, requirements: body });
       } catch {
         emit({ type: "quote_offered_unparseable" });
       }
@@ -229,8 +283,9 @@ async function main(): Promise<void> {
   emit({
     type: "probe_start",
     mode,
-    url,
+    url: currentTarget.url,
     cycles,
+    endpoint_sequence: endpointSequence ?? null,
     expected_price_atomic: expectedPrice ?? null,
     spend_controls: { maxAmountPerPayment: "$1" },
     note: "settlement is mocked by the harness; captures establish signing, not on-chain transfer",
@@ -240,8 +295,9 @@ async function main(): Promise<void> {
 
   for (let c = 1; c <= cycles; c++) {
     emit({ type: "cycle_start", cycle: c });
+    currentTarget = targetForCycle(c);
     try {
-      const response = await fetchWithPayment(url, { method: "GET" });
+      const response = await fetchWithPayment(currentTarget.url, { method: currentTarget.method });
       let receipt: unknown;
       const prHeader = response.headers.get("payment-response");
       if (prHeader) {
