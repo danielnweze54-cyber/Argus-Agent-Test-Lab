@@ -7,8 +7,8 @@ import path from 'node:path';
 export const REPO_ROOT = path.resolve(new URL('../../', import.meta.url).pathname);
 export const REGISTRY_DIR = path.join(REPO_ROOT, 'attestations');
 export const RECORDS_DIR = path.join(REGISTRY_DIR, 'records');
-export const PUBKEY_PATH = path.join(REGISTRY_DIR, 'keys', 'argus-lab-2026q4.pub.json');
-export const PRIVKEY_PATH = '/home/z/my-project/keys/argus-lab-2026q4.priv.json';
+export const PUBKEY_PATH = path.join(REGISTRY_DIR, 'keys', 'argus-lab-2026q4r2.pub.json');
+export const PRIVKEY_PATH = '/home/z/my-project/keys/argus-lab-2026q4r2.priv.json';
 
 // Deterministic JSON: recursively sorted object keys, no whitespace. Two
 // implementations of `canonical()` on any machine must produce byte-identical

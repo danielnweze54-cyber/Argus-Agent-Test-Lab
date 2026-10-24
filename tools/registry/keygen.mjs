@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PRIVKEY_PATH, PUBKEY_PATH } from './lib.mjs';
 
-const KEY_ID = 'argus-lab-2026q4';
+const KEY_ID = 'argus-lab-2026q4r2';
 const CREATED_AT = new Date().toISOString();
 
 const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');

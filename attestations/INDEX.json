@@ -1,12 +1,12 @@
 {
   "registry": "argus-agent-test-lab",
-  "chain_head": "c7d627c911cfc5ed...",
+  "chain_head": "d09ac05d3b2d7661...",
   "records": [
     {
       "seq": "0000",
       "record_id": "argus-finding-0000",
       "issued_at": "2026-10-23T21:19:09.914Z",
-      "signer_key_id": "argus-lab-2026q4",
+      "signer_key_id": "argus-lab-2026q4r2",
       "prev_record_hash": null,
       "type": "finding",
       "title": "x402 reference client signs any server-declared 402 amount (overcharge vector)",
@@ -42,14 +42,14 @@
       ],
       "discovered_by": "Argus Agent Test Lab (igor-vii)",
       "notes": "Disclosed via the project's own public tracker (coordinated disclosure). Status updates are appended as amendments; this record never attests anything about the project beyond the finding and its disclosure state.",
-      "signature": "9cb0Xk9qutzE9Y1AZuqrhGiirg1JxRx/pY1s7bleSLnBveaVX9wqQTrtK5qi2y8U80z9aVYK4awV3VFpcjtHBg=="
+      "signature": "dyJScfPlP9QgvPv1oKosyFpwNTB9lbRE8e4KvFVsRHDKckVB9o3Qhq0HUzpiF0Lh3Yg5mHJQAmq1KX2ScTzLCQ=="
     },
     {
       "seq": "0001",
       "record_id": "argus-seal-0001",
       "issued_at": "2026-10-23T21:19:09.949Z",
-      "signer_key_id": "argus-lab-2026q4",
-      "prev_record_hash": "735eae3bf24a419f25b81a70992109cab9684a5c1ca86f0c93036e089e2a50c3",
+      "signer_key_id": "argus-lab-2026q4r2",
+      "prev_record_hash": "7ba9a8ad48a737cf5f7876b6fd027d6b4276943687719266945c449df865c8ef",
       "type": "seal",
       "title": "Block D live run — S10/S11 against amw-paypal-agent-demo",
       "subject": {
@@ -109,7 +109,74 @@
         }
       ],
       "notes": "Self-attestation (the lab's own run against a third-party demo). The seal attests run validity and findings completeness — NOT bug-freeness. Finding F2 is attached and was reported to the SUT vendor.",
-      "signature": "gxNFYL4134Gort7yLUdMyVUI/dCHK/PfKABRbEDfQLAOpHQrG9LJYeVsIDgY4JcyiwySzXGqvOU6mME9STtuAQ=="
+      "signature": "7mv5CYFR7IsjZ95JgCt8j5VyKPCFCJ8SuD8YoglbRVrvD/uboUY6LhFW1lUJ1taBWWywBDL60OwWhFEQfidnAA=="
+    },
+    {
+      "seq": "0002",
+      "record_id": "argus-seal-0002",
+      "issued_at": "2026-10-24T06:07:45.038Z",
+      "signer_key_id": "argus-lab-2026q4r2",
+      "prev_record_hash": "7c1487862961846aa065d519eb5239b6172a6f0726230cfa57b0e25779d61de2",
+      "type": "seal",
+      "title": "Block D clean-machine reproduction — S10/S11 against amw-paypal-agent-demo",
+      "subject": {
+        "repo": "agentmiddleware/amw-paypal-agent-demo",
+        "commit": "60887d8eb746c032be8bc0f6dc806c6bdd0ee149",
+        "sut_note": "SUT served unmodified over its declared transport seam; faults were wire-level and Argus-owned",
+        "lab_run_commit": "099e1f73"
+      },
+      "scenarios": [
+        {
+          "id": "S10",
+          "name": "DeliveryUncertain",
+          "verdict": "PASS",
+          "checks": "26/26",
+          "findings": [
+            "F2"
+          ]
+        },
+        {
+          "id": "S11",
+          "name": "OverBudget",
+          "verdict": "PASS",
+          "checks": "11/11",
+          "findings": []
+        }
+      ],
+      "run_ts": "2026-10-24T05:14:00Z",
+      "self_run": true,
+      "findings_summary": [
+        {
+          "id": "F2",
+          "severity": "high",
+          "title": "Reconfirmed: SUT refunds a settled capture under full blackout (rail/ledger $25 divergence)",
+          "writeup": "docs/scenarios/b4-block-d-findings.md"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "file",
+          "path": "tools/paypal-adapter/evidence/2026-10-24-clean-repro/block-d-s10-verdict.json",
+          "sha256": "3b58d4ea322b411e78a5b18d99af76dc18caddee081f9346d707d77b64dc9a10"
+        },
+        {
+          "kind": "file",
+          "path": "tools/paypal-adapter/evidence/2026-10-24-clean-repro/block-d-s11-verdict.json",
+          "sha256": "536b274704def01bac913ced3d4a1c1e54aa648759bd0086794e8d236c4162ce"
+        },
+        {
+          "kind": "file",
+          "path": "tools/paypal-adapter/evidence/2026-10-24-clean-repro/sut-s10-ledger.sqlite",
+          "sha256": "c18ec94ba081f2bd0718d217094aae68d66c826c19af047dbcc147b427f390af"
+        },
+        {
+          "kind": "file",
+          "path": "tools/paypal-adapter/evidence/2026-10-24-clean-repro/sut-s11-ledger.sqlite",
+          "sha256": "a5158f478d589957bc57889f022ad1b99b3c3416c52359ed1411443981ab5289"
+        }
+      ],
+      "notes": "Independent clean-machine reproduction of seal argus-seal-0001's run from the repository alone: fresh clones, fresh environment, fresh processes, identical PASS verdicts and identical ledger money-states. Validates the evidence pack's reproducibility claim; the snapshot README now carries the exact dependency list. Environment: node v24.21.0, python 3.12.15. The seal attests run validity — NOT bug-freeness.",
+      "signature": "BsFBikST/8WidG/EpDq26kwvGsCFjXSLjQteJP6ja0dOU09ysDVp8v7vgJLJYwyv3JD8a5VaTtmGZky+PefFBg=="
     }
   ]
 }

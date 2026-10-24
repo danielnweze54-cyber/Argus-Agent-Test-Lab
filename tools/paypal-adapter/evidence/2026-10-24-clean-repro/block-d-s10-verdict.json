@@ -1,0 +1,349 @@
+{
+  "scenario": "S10 DeliveryUncertain",
+  "sut": "agentmiddleware/amw-paypal-agent-demo (mini_gateway over TCP)",
+  "rail": "Argus mock PayPal rail (mock-first loop)",
+  "price_usd": "25.00",
+  "checks": [
+    {
+      "name": "tools list advertises paypal_checkout",
+      "pass": true,
+      "detail": {
+        "expected": true,
+        "actual": true
+      }
+    },
+    {
+      "name": "A: envelope is success (not error)",
+      "pass": true,
+      "detail": {
+        "expected": false,
+        "actual": false
+      }
+    },
+    {
+      "name": "A: receipt outcome",
+      "pass": true,
+      "detail": {
+        "expected": "success",
+        "actual": "success"
+      }
+    },
+    {
+      "name": "A: rail captures completed (1 per checkout)",
+      "pass": true,
+      "detail": {
+        "expected": 1,
+        "actual": 1
+      }
+    },
+    {
+      "name": "A: rail capture attempts (2, replay not recount)",
+      "pass": true,
+      "detail": {
+        "expected": 2,
+        "actual": 2
+      }
+    },
+    {
+      "name": "A: rail replayed same-request-id capture",
+      "pass": true,
+      "detail": {
+        "expected": 1,
+        "actual": 1
+      }
+    },
+    {
+      "name": "A: distinct double-captures rejected",
+      "pass": true,
+      "detail": {
+        "expected": 0,
+        "actual": 0
+      }
+    },
+    {
+      "name": "A: wallet charged once",
+      "pass": true,
+      "detail": {
+        "expected": 1,
+        "actual": 1
+      }
+    },
+    {
+      "name": "A: no refund",
+      "pass": true,
+      "detail": {
+        "expected": 0,
+        "actual": 0
+      }
+    },
+    {
+      "name": "B: envelope reports tool failure",
+      "pass": true,
+      "detail": {
+        "expected": true,
+        "actual": true
+      }
+    },
+    {
+      "name": "B: failure came from unrecoverable transport loss",
+      "pass": true,
+      "detail": "tool raised RemoteProtocolError; credits refunded"
+    },
+    {
+      "name": "B: receipt outcome",
+      "pass": true,
+      "detail": {
+        "expected": "tool_error",
+        "actual": "tool_error"
+      }
+    },
+    {
+      "name": "B: receipt charged 0 (refunded)",
+      "pass": true,
+      "detail": {
+        "expected": "0",
+        "actual": "0"
+      }
+    },
+    {
+      "name": "B: rail captures completed so far",
+      "pass": true,
+      "detail": {
+        "expected": 2,
+        "actual": 2
+      }
+    },
+    {
+      "name": "B: wallet refunded",
+      "pass": true,
+      "detail": {
+        "expected": 1,
+        "actual": 1
+      }
+    },
+    {
+      "name": "B: FINDING rail/SUT money divergence (rail captured $25, SUT balance restored)",
+      "pass": true,
+      "detail": {
+        "sut_balance": "2500.0",
+        "rail_captures": 2
+      }
+    },
+    {
+      "name": "C: first call never delivered a verdict to the client",
+      "pass": true,
+      "detail": "socket hang up"
+    },
+    {
+      "name": "C: restart recovered stale in-flight op(s)",
+      "pass": true,
+      "detail": {
+        "stale_recovered": 1
+      }
+    },
+    {
+      "name": "C: retry returns SUT-owned delivery_uncertain (-32010)",
+      "pass": true,
+      "detail": {
+        "expected": true,
+        "actual": true
+      }
+    },
+    {
+      "name": "C: receipt outcome",
+      "pass": true,
+      "detail": {
+        "expected": "delivery_uncertain",
+        "actual": "delivery_uncertain"
+      }
+    },
+    {
+      "name": "C: charge kept (not refunded)",
+      "pass": true,
+      "detail": {
+        "expected": 2500,
+        "actual": 2500
+      }
+    },
+    {
+      "name": "C: SUT-side receipt signature verifies",
+      "pass": true,
+      "detail": {
+        "expected": true,
+        "actual": true
+      }
+    },
+    {
+      "name": "C: wallet charged once",
+      "pass": true,
+      "detail": {
+        "expected": 1,
+        "actual": 1
+      }
+    },
+    {
+      "name": "C: no refund",
+      "pass": true,
+      "detail": {
+        "expected": 0,
+        "actual": 0
+      }
+    },
+    {
+      "name": "C: rail captures frozen at 3 (retry did NOT dispatch)",
+      "pass": true,
+      "detail": {
+        "expected": 3,
+        "actual": 3
+      }
+    },
+    {
+      "name": "C: rail capture attempts frozen at 6",
+      "pass": true,
+      "detail": {
+        "expected": 6,
+        "actual": 6
+      }
+    }
+  ],
+  "verdict": "PASS",
+  "rail_evidence": {
+    "tokens_issued": 1,
+    "orders_created": 3,
+    "capture_attempts": 6,
+    "captures_completed": 3,
+    "capture_replays": 3,
+    "duplicate_capture_rejections": 0
+  },
+  "wire_log_tail": [
+    {
+      "seq": 9,
+      "ts": "2026-10-24T05:14:24.601Z",
+      "kind": "admin",
+      "action": "arm",
+      "armed": {
+        "id": "arm-3",
+        "scenario": "lost_response_after_capture",
+        "method": "GET",
+        "pathSuffix": "",
+        "times": 0
+      }
+    },
+    {
+      "seq": 10,
+      "ts": "2026-10-24T05:14:24.604Z",
+      "kind": "wire",
+      "method": "POST",
+      "path": "/v2/checkout/orders",
+      "upstream_status": 201,
+      "fault": null
+    },
+    {
+      "seq": 11,
+      "ts": "2026-10-24T05:14:24.607Z",
+      "kind": "wire",
+      "method": "POST",
+      "path": "/v2/checkout/orders/CC5F6C0082CFBEF43E/capture",
+      "upstream_status": 201,
+      "fault": "lost_response_after_capture",
+      "arm": "arm-2",
+      "note": "upstream completed; response dropped, SUT socket destroyed"
+    },
+    {
+      "seq": 12,
+      "ts": "2026-10-24T05:14:24.610Z",
+      "kind": "wire",
+      "method": "POST",
+      "path": "/v2/checkout/orders/CC5F6C0082CFBEF43E/capture",
+      "upstream_status": 201,
+      "fault": "lost_response_after_capture",
+      "arm": "arm-2",
+      "note": "upstream completed; response dropped, SUT socket destroyed"
+    },
+    {
+      "seq": 13,
+      "ts": "2026-10-24T05:14:24.612Z",
+      "kind": "wire",
+      "method": "GET",
+      "path": "/v2/checkout/orders/CC5F6C0082CFBEF43E",
+      "upstream_status": 200,
+      "fault": "lost_response_after_capture",
+      "arm": "arm-3",
+      "note": "upstream completed; response dropped, SUT socket destroyed"
+    },
+    {
+      "seq": 14,
+      "ts": "2026-10-24T05:14:24.615Z",
+      "kind": "admin",
+      "action": "disarm"
+    },
+    {
+      "seq": 15,
+      "ts": "2026-10-24T05:14:24.623Z",
+      "kind": "admin",
+      "action": "arm",
+      "armed": {
+        "id": "arm-4",
+        "scenario": "lost_response_after_capture",
+        "method": "POST",
+        "pathSuffix": "/capture",
+        "times": 0
+      }
+    },
+    {
+      "seq": 16,
+      "ts": "2026-10-24T05:14:24.623Z",
+      "kind": "admin",
+      "action": "arm",
+      "armed": {
+        "id": "arm-5",
+        "scenario": "timeout",
+        "method": "GET",
+        "pathSuffix": "",
+        "times": 0,
+        "timeoutMs": 6000
+      }
+    },
+    {
+      "seq": 17,
+      "ts": "2026-10-24T05:14:24.627Z",
+      "kind": "wire",
+      "method": "POST",
+      "path": "/v2/checkout/orders",
+      "upstream_status": 201,
+      "fault": null
+    },
+    {
+      "seq": 18,
+      "ts": "2026-10-24T05:14:24.630Z",
+      "kind": "wire",
+      "method": "POST",
+      "path": "/v2/checkout/orders/33410AEFF384332B1B/capture",
+      "upstream_status": 201,
+      "fault": "lost_response_after_capture",
+      "arm": "arm-4",
+      "note": "upstream completed; response dropped, SUT socket destroyed"
+    },
+    {
+      "seq": 19,
+      "ts": "2026-10-24T05:14:24.632Z",
+      "kind": "wire",
+      "method": "POST",
+      "path": "/v2/checkout/orders/33410AEFF384332B1B/capture",
+      "upstream_status": 201,
+      "fault": "lost_response_after_capture",
+      "arm": "arm-4",
+      "note": "upstream completed; response dropped, SUT socket destroyed"
+    },
+    {
+      "seq": 20,
+      "ts": "2026-10-24T05:14:24.633Z",
+      "kind": "wire",
+      "method": "GET",
+      "path": "/v2/checkout/orders/33410AEFF384332B1B",
+      "fault": "timeout",
+      "arm": "arm-5",
+      "note": "socket destroyed after 6000ms, request not forwarded"
+    }
+  ]
+}

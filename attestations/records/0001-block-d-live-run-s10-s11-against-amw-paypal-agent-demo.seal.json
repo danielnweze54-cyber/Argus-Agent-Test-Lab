@@ -2,8 +2,8 @@
   "seq": "0001",
   "record_id": "argus-seal-0001",
   "issued_at": "2026-10-23T21:19:09.949Z",
-  "signer_key_id": "argus-lab-2026q4",
-  "prev_record_hash": "735eae3bf24a419f25b81a70992109cab9684a5c1ca86f0c93036e089e2a50c3",
+  "signer_key_id": "argus-lab-2026q4r2",
+  "prev_record_hash": "7ba9a8ad48a737cf5f7876b6fd027d6b4276943687719266945c449df865c8ef",
   "type": "seal",
   "title": "Block D live run — S10/S11 against amw-paypal-agent-demo",
   "subject": {
@@ -63,5 +63,5 @@
     }
   ],
   "notes": "Self-attestation (the lab's own run against a third-party demo). The seal attests run validity and findings completeness — NOT bug-freeness. Finding F2 is attached and was reported to the SUT vendor.",
-  "signature": "gxNFYL4134Gort7yLUdMyVUI/dCHK/PfKABRbEDfQLAOpHQrG9LJYeVsIDgY4JcyiwySzXGqvOU6mME9STtuAQ=="
+  "signature": "7mv5CYFR7IsjZ95JgCt8j5VyKPCFCJ8SuD8YoglbRVrvD/uboUY6LhFW1lUJ1taBWWywBDL60OwWhFEQfidnAA=="
 }

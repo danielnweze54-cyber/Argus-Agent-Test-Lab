@@ -41,7 +41,7 @@ const record = {
   seq: nextSeq,
   record_id: `argus-${draft.type}-${nextSeq}`,
   issued_at: new Date().toISOString(),
-  signer_key_id: 'argus-lab-2026q4',
+  signer_key_id: 'argus-lab-2026q4r2',
   prev_record_hash: prevHash,
   ...draft,
 };

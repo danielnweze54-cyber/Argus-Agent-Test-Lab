@@ -2,7 +2,7 @@
   "seq": "0000",
   "record_id": "argus-finding-0000",
   "issued_at": "2026-10-23T21:19:09.914Z",
-  "signer_key_id": "argus-lab-2026q4",
+  "signer_key_id": "argus-lab-2026q4r2",
   "prev_record_hash": null,
   "type": "finding",
   "title": "x402 reference client signs any server-declared 402 amount (overcharge vector)",
@@ -38,5 +38,5 @@
   ],
   "discovered_by": "Argus Agent Test Lab (igor-vii)",
   "notes": "Disclosed via the project's own public tracker (coordinated disclosure). Status updates are appended as amendments; this record never attests anything about the project beyond the finding and its disclosure state.",
-  "signature": "9cb0Xk9qutzE9Y1AZuqrhGiirg1JxRx/pY1s7bleSLnBveaVX9wqQTrtK5qi2y8U80z9aVYK4awV3VFpcjtHBg=="
+  "signature": "dyJScfPlP9QgvPv1oKosyFpwNTB9lbRE8e4KvFVsRHDKckVB9o3Qhq0HUzpiF0Lh3Yg5mHJQAmq1KX2ScTzLCQ=="
 }

@@ -8,6 +8,11 @@ Argus is an independent black-box testing laboratory for AI agents and agent-bas
 
 **Agent → Scenario → SUT → Evidence → Verdict**
 
+## Public record
+
+- **Scenario registry** (runnable definitions): `src/cli/ScenarioRegistry.ts`
+- **Run & finding records** (signed, hash-chained): [`attestations/INDEX.md`](attestations/INDEX.md) — verify: `node tools/registry/verify-registry.mjs`. A seal attests run validity and findings completeness — never bug-freeness.
+
 ## What Argus tests
 
 Argus focuses on failure boundaries that ordinary happy-path tests often miss:
