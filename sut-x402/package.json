@@ -1,0 +1,26 @@
+{
+  "name": "sut-x402-base-sepolia",
+  "private": true,
+  "version": "1.0.0",
+  "description": "SUT for Argus Block B: official x402 v2 reference stack (@x402/* v2.28.0) on Base Sepolia",
+  "type": "module",
+  "scripts": {
+    "server": "tsx server.ts",
+    "client": "tsx client.ts"
+  },
+  "dependencies": {
+    "@x402/core": "2.28.0",
+    "@x402/evm": "2.28.0",
+    "@x402/express": "2.28.0",
+    "@x402/fetch": "2.28.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.18.2",
+    "tsx": "^4.21.0",
+    "viem": "^2.48.11"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@types/express": "^5.0.1",
+    "typescript": "^5.7.3"
+  }
+}

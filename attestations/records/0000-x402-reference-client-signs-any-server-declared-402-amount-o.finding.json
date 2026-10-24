@@ -1,0 +1,42 @@
+{
+  "seq": "0000",
+  "record_id": "argus-finding-0000",
+  "issued_at": "2026-10-23T21:19:09.914Z",
+  "signer_key_id": "argus-lab-2026q4r2",
+  "prev_record_hash": null,
+  "type": "finding",
+  "title": "x402 reference client signs any server-declared 402 amount (overcharge vector)",
+  "subject": {
+    "repo": "x402-foundation/x402",
+    "component": "@x402/fetch",
+    "version": "2.28.0",
+    "stack": "x402 v2 TypeScript (@x402/core 2.28.0, @x402/evm 2.28.0, @x402/fetch 2.28.0)"
+  },
+  "summary": "The reference x402 client signs and submits payment for ANY amount the server declares in 402 payment requirements, with no verification against the resource's canonical price. A server that inflated the requirement 10x was paid the inflated amount in 3/3 reproduced sessions on Base Sepolia (client authorized 100,000 units = 0.1 USDC for a resource priced at 10,000 units = 0.01 USDC). The only protection is the caller-configured spend limit (maxAmountPerPayment), which a modest overcharge passes easily.",
+  "severity": "high",
+  "reported_to": {
+    "venue": "github-issue",
+    "url": "https://github.com/x402-foundation/x402/issues/3866",
+    "reported_at": "2026-10-21"
+  },
+  "status": {
+    "state": "open",
+    "note": "no maintainer response as of 2026-10-24",
+    "as_of": "2026-10-24"
+  },
+  "test_context": {
+    "method": "black-box",
+    "rail": "Base Sepolia",
+    "reproduced": "3/3 sessions",
+    "lab_scenario_family": "S8/S9 x402 payment + S11 boundary family (over-budget enforcement)"
+  },
+  "evidence": [
+    {
+      "kind": "public-issue",
+      "url": "https://github.com/x402-foundation/x402/issues/3866"
+    }
+  ],
+  "discovered_by": "Argus Agent Test Lab (igor-vii)",
+  "notes": "Disclosed via the project's own public tracker (coordinated disclosure). Status updates are appended as amendments; this record never attests anything about the project beyond the finding and its disclosure state.",
+  "signature": "dyJScfPlP9QgvPv1oKosyFpwNTB9lbRE8e4KvFVsRHDKckVB9o3Qhq0HUzpiF0Lh3Yg5mHJQAmq1KX2ScTzLCQ=="
+}

@@ -83,7 +83,7 @@ Every finding must be represented with the following fields:
 |---|---|---|---|---|---|---|---|---|
 | B0-001 | L0-S findings cannot currently be verified from canonical main because the prior L0-S document is absent from `main`. | Audit evidence | CONVERSATION | Prior session; source document not present in repo | DECISION-REQUIRED | Do not reconstruct the four L0-S findings from memory. Original evidence is required before resolution can be verified. | B0 / evidence recovery | Architect |
 | B0-002 | L0-F findings cannot currently be verified from canonical main because the prior L0-F document is absent from `main`. | Audit evidence | CONVERSATION | Prior session; source document not present in repo | DECISION-REQUIRED | Do not reconstruct L0-F findings from memory. | B0 / evidence recovery | Architect |
-| B0-003 | L0-F2 fault-dispatch contract is present in canonical main, including contract documentation and tests. | Fault contract | REPO | `docs/l0-f2-fault-dispatch-contract.md`; `src/tests/core/FaultDispatchContract.test.ts` | RESOLVED | Contract implementation was merged into main. Remaining coverage gaps are tracked separately and are not silently treated as contract failures. | B1.1 | Architect |
+| B0-003 | L0-F2 fault-dispatch contract is present in canonical main, including contract documentation and tests. | Fault contract | REPO | `docs/guide/l0-f2-fault-dispatch-contract.md`; `src/tests/core/FaultDispatchContract.test.ts` | RESOLVED | Contract implementation was merged into main. Remaining coverage gaps are tracked separately and are not silently treated as contract failures. | B1.1 | Architect |
 | B0-004 | Four L0-F2 coverage gaps remain distinct from contract holes: infrastructure-target validation, lifecycle no-dispatch spy coverage, end-to-end positive fault application, and explicit S1/S5 structure assertions. | Test coverage | REPORT | Prior Qwen audit/report; not committed as a source document in main | DEFERRED-TO-PHASE | These are coverage gaps, not evidence that the frozen L0-F2 contract itself is invalid. | B1.1 | Architect |
 | B0-005 | Lifecycle trigger semantics must be decided: evidence-only, separate non-recursive dispatch, or bounded recursive dispatch. | Architecture | CONVERSATION | Prior L0-F2 decision record / project discussion | DEFERRED-TO-PHASE | Current frozen state is evidence/declaration only; no recursive active-fault dispatch is implemented. | B1.2 | Architect |
 | B0-006 | Edge/infrastructure fault targets, including S7 `lost_delivery`, need an explicit runtime decision. | Architecture | CONVERSATION | Prior L0-F2 discussion | DEFERRED-TO-PHASE | Current L0-F2 supports active participant/action dispatch only; edge/infrastructure targets remain declarative-only. | B1.3 | Architect |
@@ -379,8 +379,8 @@ B0 is complete only when all of the following are true:
 - [ ] Audit Trail Fragmentation is recorded.
 - [ ] No finding has been silently reconstructed from memory.
 - [ ] No existing status has been silently reclassified.
-- [ ] `docs/backlog-open-decisions.md` exists and is readable.
-- [ ] `git status --short` shows exactly one untracked or modified file: `docs/backlog-open-decisions.md`.
+- [ ] `docs/plans/backlog-open-decisions.md` exists and is readable.
+- [ ] `git status --short` shows exactly one untracked or modified file: `docs/plans/backlog-open-decisions.md`.
 - [ ] `git diff --cached --stat` is empty.
 - [ ] No staged changes exist in `src/`.
 - [ ] No staged changes exist in `.gitignore`.
@@ -785,7 +785,7 @@ The next work item must be selected from the approved roadmap or from a newly ve
 
 Canonical main was audited after B6-B closure. The detailed audit is committed at:
 
-`docs/b4-readiness-audit-2026-10-01.md`
+`docs/audits/b4-readiness-audit-2026-10-01.md`
 
 ### Remaining B4 semantic gaps
 

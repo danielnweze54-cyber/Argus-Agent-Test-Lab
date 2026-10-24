@@ -8,6 +8,8 @@ import { S6_PaymentRetry } from '../scenarios/S6_PaymentRetry';
 import { S7_LostDelivery } from '../scenarios/S7_LostDelivery';
 import { S8_X402Payment } from '../scenarios/S8_X402Payment';
 import { S9_X402Seller } from '../scenarios/S9_X402Seller';
+import { S10_DeliveryUncertain } from '../scenarios/S10_DeliveryUncertain';
+import { S11_OverBudget } from '../scenarios/S11_OverBudget';
 
 /**
  * Реестр сценариев
@@ -21,7 +23,10 @@ export const ScenarioRegistry: Map<string, ScenarioDefinition> = new Map([
   ['S6', S6_PaymentRetry],
   ['S7', S7_LostDelivery],
   ['S8', S8_X402Payment],
-  ['S9', S9_X402Seller]
+  ['S9', S9_X402Seller],
+  // Block D (fiat rails): driver-executed scenarios, spec in docs/scenarios/b4-block-d.md
+  ['S10', S10_DeliveryUncertain],
+  ['S11', S11_OverBudget]
 ]);
 
 /**

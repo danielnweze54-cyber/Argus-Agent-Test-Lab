@@ -15,7 +15,10 @@ describe('Argus CLI', () => {
     expect(ids).toContain('S7');
     expect(ids).toContain('S8');
     expect(ids).toContain('S9');
-    expect(ids.length).toBe(9);
+    // Block D (fiat rails): driver-executed scenarios, spec in docs/scenarios/b4-block-d.md
+    expect(ids).toContain('S10');
+    expect(ids).toContain('S11');
+    expect(ids.length).toBe(11);
   });
 
   it('should throw on unknown scenario', async () => {

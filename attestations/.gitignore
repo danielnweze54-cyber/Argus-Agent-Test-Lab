@@ -1,0 +1,4 @@
+# Nothing private may ever land here.
+keys/*.priv.json
+*.priv.json
+*.pem

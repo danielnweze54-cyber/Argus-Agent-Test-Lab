@@ -184,7 +184,7 @@ The `lost_delivery` edge fault is declared-only/no-op and `delivery_received` ha
 
 ### Documentation drift
 
-`docs/l0-f2-fault-dispatch-contract.md` still describes S2/S4 as using lifecycle-triggered declarations, contradicting the post-R3 scenario implementations.
+`docs/guide/l0-f2-fault-dispatch-contract.md` still describes S2/S4 as using lifecycle-triggered declarations, contradicting the post-R3 scenario implementations.
 
 ### Harness override dependence
 
