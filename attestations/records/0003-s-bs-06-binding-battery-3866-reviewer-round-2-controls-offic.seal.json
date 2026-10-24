@@ -1,0 +1,43 @@
+{
+  "seq": "0003",
+  "record_id": "argus-seal-0003",
+  "issued_at": "2026-10-24T07:00:16.499Z",
+  "signer_key_id": "argus-lab-2026q4r2",
+  "prev_record_hash": "d09ac05d3b2d7661e975bc282eedd5fab6f12e9d6582cdcef358702b49876ebf",
+  "type": "seal",
+  "title": "S-BS-06 binding battery — #3866 reviewer round-2 controls (official @x402 client v2.28.0)",
+  "subject": {
+    "repo": "x402-foundation/x402",
+    "sut_note": "official reference client stack @x402/fetch + @x402/core + @x402/evm v2.28.0 (packages pinned), instrumented at the signer boundary; adversarial resource server is Argus-owned (fault-injection stand, settlement mocked)",
+    "lab_run_commit": "d6bd8b64",
+    "lab_run_branch": "block-b/binding-battery"
+  },
+  "scenarios": [
+    {
+      "id": "S-BS-06",
+      "name": "BindingBattery",
+      "verdict": "PASS",
+      "checks": "11/11 sessions MATCH",
+      "findings": []
+    }
+  ],
+  "run_ts": "2026-10-24T07:05:00Z",
+  "self_run": true,
+  "findings_summary": [
+    {
+      "id": "F1x",
+      "severity": "info",
+      "title": "Defense boundary mapped: client v2.28.0 spendControls already reject asset/network swaps pre-signer; unguarded surface = amount within cap (both directions), payTo substitution, resource/method binding",
+      "writeup": "docs/block-b/fixtures/S-BS-06/s-bs-06-binding-battery.fixture.json (defense_boundary block)"
+    }
+  ],
+  "evidence": [
+    {
+      "kind": "file",
+      "path": "docs/block-b/fixtures/S-BS-06/s-bs-06-binding-battery.fixture.json",
+      "sha256": "57169ccdb9b850b1faa74c93623460534dee5cc589b07859e5398cd2718ebe4f"
+    }
+  ],
+  "notes": "Closes the #3866 reviewer round-2 asks (NSPG13 2026-10-22; TKCollective 2026-10-24): (1) unchanged-quote positive case WITH control mode enabled — signs x2, zero rejections, gate does not break the honest case; (2) per-field change battery — payTo rejected by control before signer, asset/network rejected by the client's own spendControls (observe-mode mirrors prove the built-in guard), resource/method change = new binding with caller-expectation coverage; (3) mid-session price DROP (bait-down) rejected before signer; (4) anchor integrity — a rejected quote never becomes the accepted anchor (signer x0, rejected x2); (5) case semantics renamed: quote-change sessions are two completed mocked cycles, not a lost-response retry. Context: independent corroboration of #3866 by three third-party implementations (Boundra replay 6/6 cross-checks; TKCollective Tanilo hook tests; 402Shield doc-only mapping), zero maintainer engagement on the thread as of 2026-10-24.",
+  "signature": "N4/+5NMoERF88vXg7euc3vVU1bL2rAzd7aue+U1Te4GOHerYTD883jh22e7vOiBc0GnXU22tLf1YAP01RQ4QDA=="
+}
