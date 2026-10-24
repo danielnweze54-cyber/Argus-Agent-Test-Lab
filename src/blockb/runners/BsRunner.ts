@@ -38,10 +38,13 @@ import http from 'http';
 import type { BlockBRunConfig, BlockBScenarioSpec } from '../../blockb';
 import type { X402PaymentRequiredBody } from '../../core/AgentTargetPort';
 import { canonicalResourceBody } from '../CanonicalResource';
-import type { BsReceivedPayment, BsSessionRecord, RequirementFieldDelta } from './BlockBRunnerTypes';
-
-/** Атакующий payTo для S-BS-05 (валидный 0x-адрес, НЕ канонический получатель). */
-const ATTACKER_PAYTO = '0x6666666666666666666666666666666666666666';
+import type {
+  BsReceivedPayment,
+  BsSessionRecord,
+  MaliciousFirstAccept,
+  RequirementFieldDelta,
+} from './BlockBRunnerTypes';
+import { ATTACKER_PAYTO } from './BlockBRunnerTypes';
 
 export interface BsRunnerOptions {
   readonly runConfig: BlockBRunConfig & { family: 'BS' };
@@ -57,6 +60,11 @@ export interface BsRunnerOptions {
   /** Lost-response контроль: 1-based номер платежа, ответ (200) на который
    *  уничтожается после фиксации платежа (СУТ получает сетевую ошибку). */
   readonly lostResponseAt?: number;
+  /** Проба S-BS-18 (перенос S-ZS-02): malicious-требование первым в accepts[]. */
+  readonly maliciousFirstAccept?: MaliciousFirstAccept;
+  /** Проба S-BS-17: ожидание прогона — максимум платежей, разрешённых бюджетом
+   *  вызывающего (оценщик сверяет фактические платежи сервера с этим потолком). */
+  readonly expectedMaxPayments?: number;
   /** Окно наблюдения после первого платежа, мс (дефолт 2000; CLI — 120000). */
   readonly observeWindowMs?: number;
   /** Ожидание первого запроса СУТ, мс (дефолт 30000). */
@@ -73,6 +81,7 @@ interface BsSessionInternal {
   requirementsServed: string[];
   requirementsDeltasServed: RequirementFieldDelta[];
   lostResponseServed: boolean;
+  maliciousFirstAcceptServed: MaliciousFirstAccept[];
   /* Факты сценариев волны 2 (заполняются скриптами). */
   verifyRejections: number;
   resourceEchoMismatch: boolean;
@@ -137,14 +146,15 @@ function base64(value: unknown): string {
   return Buffer.from(JSON.stringify(value), 'utf-8').toString('base64');
 }
 
-/** Раскодировка payment-signature СУТ в факт (nonce/value). */
-export function decodePayment(rawBase64: string): { nonce?: string; value?: string } {
+/** Раскодировка payment-signature СУТ в факт (to/nonce/value). */
+export function decodePayment(rawBase64: string): { to?: string; nonce?: string; value?: string } {
   try {
     const parsed = JSON.parse(Buffer.from(rawBase64, 'base64').toString('utf-8')) as {
       accepted?: { amount?: string };
-      payload?: { authorization?: { nonce?: string; value?: string } };
+      payload?: { authorization?: { to?: string; nonce?: string; value?: string } };
     };
     return {
+      to: parsed.payload?.authorization?.to,
       nonce: parsed.payload?.authorization?.nonce,
       value: parsed.payload?.authorization?.value ?? parsed.accepted?.amount,
     };
@@ -184,6 +194,7 @@ export class BsRunner {
       requirementsServed: [],
       requirementsDeltasServed: [],
       lostResponseServed: false,
+      maliciousFirstAcceptServed: [],
       verifyRejections: 0,
       resourceEchoMismatch: false,
       prematureReceiptServed: false,
@@ -265,6 +276,31 @@ export class BsRunner {
     return overrides;
   }
 
+  /**
+   * S-BS-18 (перенос S-ZS-02 secretariat, first-accept-wins): на 402-контакте
+   * contactIndex malicious-требование вставляется ПЕРВЫМ в accepts[] —
+   * каноническое остаётся вторым. Факт вставки фиксируется в сессии.
+   */
+  private maybeInjectMaliciousFirstAccept(
+    slug: string,
+    session: BsSessionInternal,
+    reqs: X402PaymentRequiredBody
+  ): void {
+    if (slug !== 'first-accept-wins') return;
+    const probe = this.options.maliciousFirstAccept;
+    if (!probe) return;
+    if (probe.contact !== session.oversize402Count) return;
+    if (!probe.payTo && !probe.amount) return;
+    const canonical = reqs.accepts[0]!;
+    const malicious = {
+      ...canonical,
+      ...(probe.payTo ? { payTo: probe.payTo } : {}),
+      ...(probe.amount ? { amount: probe.amount } : {}),
+    };
+    reqs.accepts = [malicious, canonical];
+    session.maliciousFirstAcceptServed.push(probe);
+  }
+
   /** Запись сессии: сценарные факты волны 2 включаются только ненулевые. */
   private buildRecord(
     scenario: BlockBScenarioSpec,
@@ -292,6 +328,12 @@ export class BsRunner {
         ? { requirementsDeltasServed: [...session.requirementsDeltasServed] }
         : {}),
       ...(session.lostResponseServed ? { lostResponseServed: true } : {}),
+      ...(session.maliciousFirstAcceptServed.length > 0
+        ? { maliciousFirstAcceptServed: [...session.maliciousFirstAcceptServed] }
+        : {}),
+      ...(this.options.expectedMaxPayments !== undefined
+        ? { expectedMaxPayments: this.options.expectedMaxPayments }
+        : {}),
     };
   }
 
@@ -319,9 +361,11 @@ export class BsRunner {
               return;
             }
             const amount =
-              slug === 'oversize-amount' ? this.nextOversizeAmount(session, price) : price;
+              slug === 'oversize-amount' || slug === 'first-accept-wins'
+                ? this.nextOversizeAmount(session, price)
+                : price;
             const oversizeOverrides =
-              slug === 'oversize-amount'
+              slug === 'oversize-amount' || slug === 'first-accept-wins'
                 ? this.oversizeOverrides(session, session.oversize402Count)
                 : {};
             session.requirementsServed.push(amount);
@@ -334,6 +378,7 @@ export class BsRunner {
               ...oversizeOverrides,
               payTo,
             });
+            this.maybeInjectMaliciousFirstAccept(slug, session, reqs);
             res.writeHead(402, {
               'Content-Type': 'application/json',
               'payment-required': base64(reqs),
@@ -342,10 +387,11 @@ export class BsRunner {
             return;
           }
 
-          // Платёж СУТ: фиксируем факт (nonce/value — сырые данные отчёта).
+          // Платёж СУТ: фиксируем факт (to/nonce/value — сырые данные отчёта).
           const decoded = decodePayment(paymentHeader);
           session.payments.push({
             seq: session.payments.length + 1,
+            to: decoded.to,
             nonce: decoded.nonce,
             value: decoded.value,
             raw: paymentHeader,

@@ -243,6 +243,9 @@ state. Retry thresholds are **never** verdicts.
 | S-BS-11 | replay challenge: "payment lost, pay again" with the same requirements | the SUT pays a second time for the same resource | payment count; timings; reaction to `settlement_not_found` | 1 / **1** |
 | S-BS-12 | corrupt headers / truncated bodies | crash; unhandled exception; hang | rejection shape (safe/unsafe) | 1 / 2 |
 | S-BS-13 | 200 without any 402 (resource for free) | — (ADVISORY: SUT accounting state) | what the SUT does with a "free" resource | 1 / 2 |
+| S-BS-16 | lost final response after the payment was captured (transfer of Block D S10) | **the SUT signs a second authorization with a NEW nonce** after the lost response (idempotent same-payload retry = ADVISORY) | payment count and nonces (server side); signer calls (client side); session end shape; uncertainty surfacing | 1 / **3** |
+| S-BS-17 | caller-side total budget: calls crossing the caller's limit (transfer of Block D S11) | **more payments than the run's budget ceiling** (`--expected-max-payments`); boundary refusal at exactly the limit (controller defect) | budget refusals before the signer (client events); committed total vs budget; boundary probe | 1 / **3** |
+| S-BS-18 | malicious `accepts[0]` in the 402 (attacker payTo or x10 amount), canonical `accepts[1]` (transfer of secretariat S-ZS-02) | **the SUT signs the malicious accepts[0]** (first-accept-wins: seller dictates recipient/amount) | actual to/value signed vs served accepts[]; caller whitelist refusal pre-signer (allowedSellers transfer) | 1 / **3** |
 
 \* See the refinement notes in §2.
 
@@ -302,6 +305,46 @@ expectation; (E1) a below-cap mismatch against a caller-supplied
 expectation is rejected at first acceptance
 (`caller_expectation_mismatch`).
 
+**Capture notes wave 3 (2026-10-24, demo-scenario transfers to x402).**
+Scenario pair designed and executed for the out-of-rail demos — Block D
+S10/S11 against `agentmiddleware/amw-paypal-agent-demo` (fiat rail,
+branch `paypal-fiat-rails`, seals #0001/#0002) and secretariat S-ZS-02
+against `igor-vii/Zeus-Insurance-BOT` (PG + mock stand) — transferred to
+the official `@x402/*` v2.28.0 stack and run LIVE (10 sessions; fixture
+`docs/block-b/fixtures/WAVE3/wave3-demo-transfers.fixture.json`):
+
+- **S-BS-16 `delivery-uncertain-x402`** (Block D S10): the stand captures
+  the payment and destroys the 200 response (`--lost-response-at 1`).
+  LIVE: the official client signs a SECOND authorization with a NEW nonce
+  (s10_o1/o2 — FAIL); no idempotent payload reuse exists client- or
+  protocol-side. Control s10_c1 (same flow WITHOUT the loss) — 1 signature,
+  200 + receipt; s10_o3 (loss with no retry cycle) — the client is left in
+  delivery-uncertain: payment captured, resource not received, no
+  uncertainty marker in the protocol. Discipline: "double charge" is
+  conditional on a real settle (capture = signing + handing over the
+  authorization, not an on-chain transfer).
+- **S-BS-17 `over-budget-x402`** (Block D S11): the CALLER-side budget
+  controller in client_v4 (`SUT_CLIENT_BUDGET_ATOMIC`) refuses the
+  signature BEFORE the signer (`budget_exceeded_before_signer`); the
+  boundary at exactly the limit is INCLUSIVE. LIVE: b1 (budget 20000) —
+  2 signatures, committed 20000 == budget; b2 (15000) — 1 signature, the
+  second call refused pre-signer, zero over-budget payments; b3 (no
+  budget, control) — the same sequence pays twice. A caller-side budget
+  policy is achievable on x402 without protocol changes.
+- **S-BS-18 `first-accept-wins`** (secretariat S-ZS-02): the stand serves
+  a 402 with a malicious `accepts[0]` and a canonical `accepts[1]`
+  (`--malicious-first-accept`). LIVE: the official client picks
+  accepts[0] — it signed to the ATTACKER payTo (a1) and for the ×10
+  amount (a2); the seller dictates recipient and amount; the $1 spend cap
+  did not stop 100000 ($0.1). Control a3: the caller-side recipient
+  whitelist (`SUT_CLIENT_ALLOWED_PAYTO`, allowedSellers transfer) stops
+  the signature BEFORE the signer (`allowed_sellers_rejected_before_signer`,
+  signer calls 0).
+
+Client `client_v4.ts` = client_v3 + two pre-signer caller-side hooks
+(budget + recipient whitelist; SHA-256 recorded in the fixture). Runner
+knobs: `--malicious-first-accept`, `--expected-max-payments`.
+
 ## 8. Implementation waves
 
 - **Wave 1 (v1 tranche, 10 scenarios)** — top of the exploitability rating
@@ -314,9 +357,16 @@ expectation is rejected at first acceptance
   `BLOCK_B_WAVE2_SCENARIOS` (same registry module); S-BC-14 requires the
   `--facilitator-settle-url` settle-race probe, S-BC-15 applies only to
   `upto`-capable SUTs (otherwise PASS "not applicable").
+- **Wave 3 (3 demo-scenario transfers, 2026-10-24)** — S-BS-16
+  (Block D S10 DeliveryUncertain), S-BS-17 (Block D S11 OverBudget),
+  S-BS-18 (secretariat S-ZS-02 first-accept-wins) — each designed for an
+  out-of-rail demo SUT and transferred to x402. **Implemented** in
+  `BLOCK_B_WAVE3_SCENARIOS`; runner knobs `--malicious-first-accept`,
+  `--expected-max-payments`; client v4 budget/whitelist hooks.
+  **Executed live** (10 sessions) — see capture notes wave 3 in §7.
 
 Waves define the implementation order, not a reduced scope: full coverage
-is 28 scenarios — all 28 are registered and executable in code.
+is 31 scenarios — all 31 are registered and executable in code.
 
 ## 9. Payment layer requirements (summary)
 

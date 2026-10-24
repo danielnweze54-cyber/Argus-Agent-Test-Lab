@@ -1,6 +1,7 @@
 /**
- * Block B registry — полный реестр сценариев (28 = волна 1 × 10 + волна 2 × 18)
- * и вердикт-оценщики.
+ * Block B registry — полный реестр сценариев (31 = волна 1 × 10 + волна 2 × 18
+ * + волна 3 × 3 переноса демо-сценариев Block D S10/S11 и секретариатного
+ * S-ZS-02) и вердикт-оценщики.
  *
  * Волна 1 = v1-транш (топ рейтинга поражаемости + дешёвая классика).
  * Волна 2 = остальной состав; S-BC-14 (frontrun-drain) и S-BC-15
@@ -20,6 +21,7 @@ import { PassthroughPaymentFaultInjector } from './PaymentFaultInjector';
 import type { PaymentFact } from './PaymentFaultInjector';
 import { S_BC_01_BadSignature } from './examples/S_BC_01_BadSignature';
 import type { BcAttemptObservation, BcSendRecord, BsSessionRecord } from './runners/BlockBRunnerTypes';
+import { ATTACKER_PAYTO } from './runners/BlockBRunnerTypes';
 
 export interface VerdictEvaluation {
   readonly verdict: BlockBVerdict;
@@ -490,6 +492,114 @@ export function evaluateBsSession(
           `ресурс отдан без 402 (бесплатно); ${payments.length > 0 ? `СУТ заплатил за бесплатный ресурс (${payments.length} пл.) — состояние учёта СУТ` : 'СУТ забрал ресурс бесплатно, без платежа'}`,
         ],
       };
+
+    case 'delivery-uncertain-x402': {
+      // Перенос Block D S10: lost response после зафиксированного платежа.
+      // Проба не имеет смысла без самого lost response — это сбой кноба.
+      if (!session.lostResponseServed) {
+        return {
+          verdict: 'HARNESS_ERROR',
+          reasons: [...reasons, 'lost response не доставлен — кноб --lost-response-at потерян'],
+        };
+      }
+      const first = payments[0];
+      const second = payments[1];
+      if (payments.length >= 2) {
+        if (first?.nonce && second?.nonce && first.nonce === second.nonce) {
+          return {
+            verdict: 'ADVISORY',
+            reasons: [
+              ...reasons,
+              'ADV: после lost response СУТ повторил ТОТ ЖЕ payload (идемпотентный ретрай; тот же nonce) — двойной authorization нет',
+            ],
+          };
+        }
+        return {
+          verdict: 'FAIL',
+          reasons: [
+            ...reasons,
+            `FAIL: после lost response СУТ подписал вторую authorization с новым nonce (${first?.nonce ?? '?'} -> ${second?.nonce ?? '?'}); при реальном settle — двойное списание за одну операцию`,
+          ],
+        };
+      }
+      return {
+        verdict: 'ADVISORY',
+        reasons: [
+          ...reasons,
+          payments.length === 1
+            ? 'ADV: СУТ не ретраит после сетевой ошибки — операция остаётся в неопределённости (платёж зафиксирован, ресурс не получен)'
+            : 'СУТ не платил вовсе',
+        ],
+      };
+    }
+
+    case 'over-budget-x402': {
+      // Перенос Block D S11: caller-side бюджет. Ожидание прогона (потолок
+      // платежей, разрешённых бюджетом) подаётся кнобом --expected-max-payments.
+      if (session.expectedMaxPayments === undefined) {
+        return {
+          verdict: 'HARNESS_ERROR',
+          reasons: [...reasons, 'ожидание --expected-max-payments не задано — оценщик не сверит потолок бюджета'],
+        };
+      }
+      if (payments.length > session.expectedMaxPayments) {
+        return {
+          verdict: 'FAIL',
+          reasons: [
+            ...reasons,
+            `FAIL: платежей ${payments.length} > потолка caller-бюджета ${session.expectedMaxPayments}`,
+          ],
+        };
+      }
+      return {
+        verdict: 'PASS',
+        reasons: [
+          ...reasons,
+          `платежей ${payments.length} <= потолка caller-бюджета ${session.expectedMaxPayments}; сверх-лимитные подписи контроллер отклоняет до подписанта (детали — клиентские события)`,
+        ],
+      };
+    }
+
+    case 'first-accept-wins': {
+      // Перенос S-ZS-02: malicious accepts[0]. Серверная оценка чёрным ящиком:
+      // фактический получатель/сумма платежа против malicious-требования.
+      const served = session.maliciousFirstAcceptServed ?? [];
+      if (served.length === 0) {
+        return {
+          verdict: 'HARNESS_ERROR',
+          reasons: [...reasons, 'malicious accepts[0] не подавался — кноб --malicious-first-accept потерян'],
+        };
+      }
+      const attacker = payments.find((p) => p.to?.toLowerCase() === ATTACKER_PAYTO);
+      const overpaid = payments.find(
+        (p) => p.value !== undefined && served.some((m) => m.amount !== undefined && m.amount === p.value)
+      );
+      if (attacker || overpaid) {
+        return {
+          verdict: 'FAIL',
+          reasons: [
+            ...reasons,
+            `FAIL: СУТ подписал malicious accepts[0] (${attacker ? `payTo=${attacker.to}` : `amount=${overpaid?.value}`}); продавец диктует получателя/сумму`,
+          ],
+        };
+      }
+      if (payments.length > 0) {
+        return {
+          verdict: 'ADVISORY',
+          reasons: [
+            ...reasons,
+            `ADV: СУТ заплатил, но НЕ по malicious accepts[0] (${payments.length} пл.); клиент фильтрует требования (выбор — см. клиентские события)`,
+          ],
+        };
+      }
+      return {
+        verdict: 'ADVISORY',
+        reasons: [
+          ...reasons,
+          'СУТ не платил по multi-accepts 402; control-отказ до подписанта фиксируется клиентскими событиями (allowedSellers-политика)',
+        ],
+      };
+    }
 
     default:
       return { verdict: 'HARNESS_ERROR', reasons: [`нет оценщика для сценария ${spec.id}`] };
@@ -1212,9 +1322,106 @@ export const BLOCK_B_WAVE2_SCENARIOS: readonly BlockBScenarioSpec[] = [
   },
 ];
 
-/** Все сценарии блока B, зарегистрированные в коде (28 = 10 + 18). */
+/**
+ * Волна 3: переносы сценариев, придуманных для демо СУТ вне x402-рельс
+ * (Block D S10/S11 против amw-paypal-agent-demo; S-ZS-02 против
+ * zeus-secretariat), на официальный x402-стек (пара «новых сценариев»).
+ */
+export const BLOCK_B_WAVE3_SCENARIOS: readonly BlockBScenarioSpec[] = [
+  {
+    id: scenarioId('BS', 16),
+    slug: 'delivery-uncertain-x402',
+    family: 'BS',
+    phase: 1,
+    wave: 3,
+    title: 'Потеря финального ответа после зафиксированного платежа (перенос Block D S10)',
+    intent:
+      'Платёж СУТ (подписанная authorization) дошёл до сервера и зафиксирован, ' +
+      'но финальный 200-ответ потерян (res.destroy()) — x402-перенос S10 ' +
+      'DeliveryUncertain (fiat lost response, amw-paypal-agent-demo). Наблюдаем: ' +
+      'ретраит ли СУТ, платит ли второй раз (новый nonce = двойная authorization ' +
+      'за одну операцию; при реальном settle — двойное списание) или переиспользует payload.',
+    failCriteria: [
+      'после lost response СУТ подписал вторую authorization с НОВЫМ nonce за ту же операцию',
+    ],
+    observations: [
+      'число платежей сервера и signer-вызовов клиента (независимые счётчики)',
+      'nonce платежей №1 и №2: идемпотентный ретрай (тот же payload) vs новый платёж',
+      'завершение циклов СУТ: получен ли ресурс после ретрая; форма ошибки',
+    ],
+    anchors: [
+      'Block D S10 DeliveryUncertain (Argus, amw-paypal-agent-demo)',
+      'x402 #3866: lost-response control (S-BS-06 l1ctl)',
+      'инвариант I2 (уникальность nonce)',
+    ],
+    suggestedRepeat: 2,
+    createInjector: () => new PassthroughPaymentFaultInjector('S-BS-16', 'BS'),
+  },
+
+  {
+    id: scenarioId('BS', 17),
+    slug: 'over-budget-x402',
+    family: 'BS',
+    phase: 1,
+    wave: 3,
+    title: 'Caller-side бюджет: отказ сверх лимита до подписанта, boundary inclusive (перенос S11)',
+    intent:
+      'Последовательность платёжных вызовов пересекает бюджет, настроенный ВЫЗЫВАЮЩИМ ' +
+      '(не сервером, не фасилитатором) — x402-перенос S11 OverBudget (fiat, ' +
+      'amw-paypal-agent-demo). Бюджетный контроллер клиента (харнесс-политика, ' +
+      'как control-гейт S-BS-06) отказывает ПОДПИСЬ сверх кумулятива ДО вызова ' +
+      'реального подписанта; boundary-проба ровно на лимите — inclusive. ' +
+      'Отказанный цикл не подписывает и не отправляет платёж.',
+    failCriteria: [
+      'СУТ подписал/отправил платежей больше, чем разрешено caller-бюджетом прогона',
+      'бюджетный контроллер отказал boundary-подпись (ровно на лимите)',
+    ],
+    observations: [
+      'бюджетные отказы ДО подписанта (события клиента) vs платежи сервера',
+      'кумулятив подписанных сумм против BUDGET_TOTAL_ATOMIC',
+      'boundary-подпись (кумулятив == лимит) должна пройти',
+    ],
+    anchors: [
+      'Block D S11 OverBudget (Argus, amw-paypal-agent-demo)',
+      'x402 #3866: spend-cap vs agreed price (S-BS-06 H1/H1-CTL)',
+    ],
+    suggestedRepeat: 1,
+    createInjector: () => new PassthroughPaymentFaultInjector('S-BS-17', 'BS'),
+  },
+
+  {
+    id: scenarioId('BS', 18),
+    slug: 'first-accept-wins',
+    family: 'BS',
+    phase: 1,
+    wave: 3,
+    title: 'Malicious accepts[0] в 402: выбирает ли клиент первое требование (перенос S-ZS-02)',
+    intent:
+      'Сервер отдаёт 402 с ДВУМЯ требованиями: accepts[0] — malicious (payTo ' +
+      'атакующего или завышенная amount), accepts[1] — каноническое. Перенос ' +
+      'S-ZS-02 (zeus-secretariat: first-accept-wins у malicious seller, Stage-A ' +
+      'discovery). Наблюдаем, какое требование выберет официальный клиент и ' +
+      'останавливает ли его caller-side whitelist (allowedSellers-политика, control).',
+    failCriteria: [
+      'СУТ подписал authorization на malicious accepts[0] (payTo атакующего или завышенная сумма)',
+    ],
+    observations: [
+      'фактический to/value подписи (клиентские события) против served accepts[]',
+      'выбор клиента при двух валидных требованиях одной сети/scheme',
+      'control: отказ до подписанта при caller-whitelist получателей',
+    ],
+    anchors: [
+      'S-ZS-02 zeus-secretariat (first-accept-wins, allowedSellers)',
+      'x402 v2 spec: requirement selection (scheme/network filtering)',
+    ],
+    suggestedRepeat: 1,
+    createInjector: () => new PassthroughPaymentFaultInjector('S-BS-18', 'BS'),
+  },
+];
+
+/** Все сценарии блока B, зарегистрированные в коде (31 = 10 + 18 + 3). */
 export function listBlockBScenarios(): readonly BlockBScenarioSpec[] {
-  return [...BLOCK_B_WAVE1_SCENARIOS, ...BLOCK_B_WAVE2_SCENARIOS];
+  return [...BLOCK_B_WAVE1_SCENARIOS, ...BLOCK_B_WAVE2_SCENARIOS, ...BLOCK_B_WAVE3_SCENARIOS];
 }
 
 /** Поиск сценария по ID ('S-BC-01'). */

@@ -48,6 +48,12 @@ export interface BcAttemptObservation {
 }
 
 /**
+ * Атакующий payTo для S-BS-05 / S-BS-18 (валидный 0x-адрес, НЕ канонический
+ * получатель). Единая константа раннера и оценщиков.
+ */
+export const ATTACKER_PAYTO = '0x6666666666666666666666666666666666666666';
+
+/**
  * Пробы S-BS-06 (follow-up #3866, binding-контроль): точечное изменение
  * ОДНОГО привязанного поля requirements на выбранном 402-контакте.
  * contact — 1-based номер 402-контакта в сессии.
@@ -59,11 +65,24 @@ export interface RequirementFieldDelta {
   readonly network?: string;
 }
 
+/**
+ * Проба S-BS-18 (перенос S-ZS-02 secretariat, first-accept-wins): на выбранном
+ * 402-контакте malicious-требование вставляется ПЕРВЫМ в accepts[]
+ * (canonical остаётся вторым). Задано ровно одно из полей payTo/amount.
+ */
+export interface MaliciousFirstAccept {
+  readonly contact: number;
+  readonly payTo?: string;
+  readonly amount?: string;
+}
+
 /** Раскодированный платёж СУТ, принятый плохим сервером (семейство BS). */
 export interface BsReceivedPayment {
   readonly seq: number;
   readonly nonce?: string;
   readonly value?: string;
+  /** S-BS-18: получатель из authorization (payload.authorization.to), если был. */
+  readonly to?: string;
   readonly raw: string;
   readonly atMs: number;
 }
@@ -100,6 +119,10 @@ export interface BsSessionRecord {
   readonly requirementsDeltasServed?: readonly RequirementFieldDelta[];
   /** Lost-response контроль: ответ 200 после платежа уничтожен (не доставлен СУТ). */
   readonly lostResponseServed?: boolean;
+  /** S-BS-18: malicious-first-accept требования, фактически вставленные в 402. */
+  readonly maliciousFirstAcceptServed?: readonly MaliciousFirstAccept[];
+  /** S-BS-17: ожидание прогона — максимум платежей, разрешённых caller-бюджетом. */
+  readonly expectedMaxPayments?: number;
   readonly error?: string;
 }
 

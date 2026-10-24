@@ -71,6 +71,9 @@
 | S-BS-11 | replay-challenge | 1 | 1 | Повторное выставление того же nonce после успешной оплаты | NDSS'26 TOCTOU; FAIL при втором платеже |
 | S-BS-12 | corrupt-transport | 1 | 2 | Битые заголовки / обрезанные тела 402/200 | robustness; FAIL при краше/зависании |
 | S-BS-13 | premature-200 | 1 | 2 | 200 без всякого 402 (ресурс «бесплатно») | зеркало free shopping; ADVISORY |
+| S-BS-16 | delivery-uncertain-x402 | 1 | 3 | Потеря финального ответа после зафиксированного платежа (перенос Block D S10) | идемпотентность lost-response: ретрай с новым nonce = двойная authorization |
+| S-BS-17 | over-budget-x402 | 1 | 3 | Caller-side бюджет: отказ сверх лимита до подписанта, boundary inclusive (перенос Block D S11) | бюджет вызывающего (не сервера/фасилитатора) |
+| S-BS-18 | first-accept-wins | 1 | 3 | Malicious accepts[0] в 402: выбирает ли клиент первое требование (перенос S-ZS-02) | выбор требования клиентом; allowedSellers-политика |
 
 ## Внешние находки (живой прогон 2026-10-21, Base Sepolia)
 
@@ -155,6 +158,46 @@ control, `EXPECTED_PRICE_ATOMIC=10000`, стек @x402/* 2.28.0:
 Фикстура: `docs/block-b/fixtures/S-BS-06/s-bs-06-binding-controls.fixture.json`
 (кнобы раннера: `--requirement-deltas`, `--lost-response-at`).
 
+### Волна 3 (2026-10-24, живой прогон): переносы демо-сценариев на x402
+
+Пара «новых» сценариев, придуманных и исполненных для демок вне x402-рельс,
+перенесена на официальный стек @x402/* v2.28.0 и прогнана живьём
+(10 сессий, `run-w3-artifacts`, фикстура
+`docs/block-b/fixtures/WAVE3/wave3-demo-transfers.fixture.json`):
+
+- **S-BS-16 `delivery-uncertain-x402`** ← Block D S10 DeliveryUncertain
+  (fiat lost response, amw-paypal-agent-demo). Платёж зафиксирован стендом,
+  ответ 200 уничтожен (`--lost-response-at 1`), далее ретрай клиента.
+  Живой результат: официальный клиент подписывает ВТОРУЮ authorization с
+  НОВЫМ nonce (s10_o1/o2 — FAIL); идемпотентного повторного использования
+  payload нет ни у клиента, ни в протоколе. Контроль s10_c1 (тот же флоу
+  БЕЗ потери, slug late-double-charge 1-й цикл) — 1 подпись, 200 + квитанция;
+  s10_o3 (потеря без ретрая) — клиент в неопределённости: платёж
+  зафиксирован, ресурс не получен, маркера uncertainty в протоколе нет.
+  Дисциплина: «двойное списание» — условно при реальном settle (capture =
+  подписание + передача authorization, не on-chain перевод).
+- **S-BS-17 `over-budget-x402`** ← Block D S11 OverBudget (fiat).
+  Бюджетный контроллер ВЫЗЫВАЮЩЕГО в client_v4 (`SUT_CLIENT_BUDGET_ATOMIC`):
+  отказ ДО подписанта (`budget_exceeded_before_signer`), boundary ровно на
+  лимите — inclusive. Живой результат: b1 (20000) — 2 подписи, committed
+  20000 == бюджет; b2 (15000) — 1 подпись, второй цикл отказан до подписанта,
+  сверх-лимитных платежей 0; b3 (контроль без бюджета) — тот же флоу платит
+  дважды. Caller-side бюджетная политика достижима на x402 без изменений
+  протокола.
+- **S-BS-18 `first-accept-wins`** ← S-ZS-02 zeus-secretariat (malicious
+  seller, Stage-A discovery). Стенд отдаёт 402 с accepts[0] malicious и
+  accepts[1] каноническим (`--malicious-first-accept`). Живой результат:
+  официальный клиент выбирает accepts[0] — подписал payTo атакующего
+  (a1) и завышенную amount ×10 (a2) — продавец диктует получателя и сумму;
+  spend-кап $1 не остановил 100000 ($0.1). Контроль a3: caller-side
+  whitelist получателей (`SUT_CLIENT_ALLOWED_PAYTO`, перенос allowedSellers)
+  останавливает подпись ДО подписанта (`allowed_sellers_rejected_before_signer`,
+  signer-вызовов 0).
+
+Клиент `client_v4.ts` = client_v3 + два caller-side хука до подписанта
+(бюджет + whitelist; sha256 в фикстуре). Кнобы раннера:
+`--malicious-first-accept`, `--expected-max-payments`.
+
 ## Связанные документы и код
 
 - Матрица ожидаемого поведения, вердикты, CLI, фондирование, ресурс:
@@ -163,7 +206,7 @@ control, `EXPECTED_PRICE_ATOMIC=10000`, стек @x402/* 2.28.0:
   FundingProvider, CanonicalResource), раннеры `src/blockb/runners/`
   (BcRunner с drain-пробой S-BC-14, BsRunner со скриптами волны 2),
   CLI `src/cli/blockBCommand.ts` (--facilitator-settle-url, --funding).
-- Тесты: `src/tests/blockb/` (реестр 28, мок-СУТ BC, фейковый клиент BS,
+- Тесты: `src/tests/blockb/` (реестр 31, мок-СУТ BC, фейковый клиент BS,
   оценщики, CLI-парсер).
 - Пререквизит запуска: фикс MAJ-4 (детерминированный nonce `0x0…0` →
   рандомный) — ВЫПОЛНЕН (defaultSigningIntentSource, crypto.randomBytes);
