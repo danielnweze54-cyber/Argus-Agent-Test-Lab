@@ -38,7 +38,7 @@ import http from 'http';
 import type { BlockBRunConfig, BlockBScenarioSpec } from '../../blockb';
 import type { X402PaymentRequiredBody } from '../../core/AgentTargetPort';
 import { canonicalResourceBody } from '../CanonicalResource';
-import type { BsReceivedPayment, BsSessionRecord } from './BlockBRunnerTypes';
+import type { BsReceivedPayment, BsSessionRecord, RequirementFieldDelta } from './BlockBRunnerTypes';
 
 /** Атакующий payTo для S-BS-05 (валидный 0x-адрес, НЕ канонический получатель). */
 const ATTACKER_PAYTO = '0x6666666666666666666666666666666666666666';
@@ -51,6 +51,12 @@ export interface BsRunnerOptions {
   /** Пробы S-BS-06 (follow-up #3866): суммы requirements на каждый 402-контакт
    *  по порядку (последний элемент повторяется). Не задана — легаси price×10. */
   readonly oversizeSequence?: readonly string[];
+  /** Пробы S-BS-06 binding-контроль (#3866): точечные изменения привязанных
+   *  полей (payTo/asset/network) на указанном 402-контакте. */
+  readonly oversizeFieldDeltas?: readonly RequirementFieldDelta[];
+  /** Lost-response контроль: 1-based номер платежа, ответ (200) на который
+   *  уничтожается после фиксации платежа (СУТ получает сетевую ошибку). */
+  readonly lostResponseAt?: number;
   /** Окно наблюдения после первого платежа, мс (дефолт 2000; CLI — 120000). */
   readonly observeWindowMs?: number;
   /** Ожидание первого запроса СУТ, мс (дефолт 30000). */
@@ -65,6 +71,8 @@ interface BsSessionInternal {
   oversizeAmount: string;
   oversize402Count: number;
   requirementsServed: string[];
+  requirementsDeltasServed: RequirementFieldDelta[];
+  lostResponseServed: boolean;
   /* Факты сценариев волны 2 (заполняются скриптами). */
   verifyRejections: number;
   resourceEchoMismatch: boolean;
@@ -81,7 +89,7 @@ function buildRequirements(
   resourceUrl: string,
   amount: string,
   description: string,
-  overrides?: { payTo?: string }
+  overrides?: { payTo?: string; asset?: string; network?: string }
 ): X402PaymentRequiredBody {
   return {
     x402Version: 2,
@@ -89,9 +97,9 @@ function buildRequirements(
     accepts: [
       {
         scheme: 'exact',
-        network: 'eip155:84532',
+        network: overrides?.network ?? 'eip155:84532',
         amount,
-        asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        asset: overrides?.asset ?? '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
         payTo: overrides?.payTo ?? '0x9999999999999999999999999999999999999999',
         maxTimeoutSeconds: 60,
         // v2-спека: клиент строит EIP-712 домен по extra.name/extra.version;
@@ -174,6 +182,8 @@ export class BsRunner {
       oversizeAmount: (BigInt(price) * 10n).toString(),
       oversize402Count: 0,
       requirementsServed: [],
+      requirementsDeltasServed: [],
+      lostResponseServed: false,
       verifyRejections: 0,
       resourceEchoMismatch: false,
       prematureReceiptServed: false,
@@ -223,7 +233,8 @@ export class BsRunner {
 
   /**
    * Сумма следующего 402 slug'а oversize-amount: пробы с секвенцией сумм
-   * (последний элемент повторяется) или легаси price×10.
+   * (последний элемент повторяется) или легаси price×10. Счётчик контактов
+   * инкрементируется всегда — от него зависят binding-дельты.
    */
   private nextOversizeAmount(session: BsSessionInternal, price: string): string {
     const seq = this.options.oversizeSequence;
@@ -232,7 +243,26 @@ export class BsRunner {
       session.oversize402Count += 1;
       return seq[idx]!;
     }
+    session.oversize402Count += 1;
     return session.oversizeAmount;
+  }
+
+  /**
+   * Binding-дельты (#3866): оверрайды привязанных полей для 402-контакта
+   * contactIndex (1-based). Факт дельты фиксируется в сессии.
+   */
+  private oversizeOverrides(
+    session: BsSessionInternal,
+    contactIndex: number
+  ): { payTo?: string; asset?: string; network?: string } {
+    const delta = this.options.oversizeFieldDeltas?.find((d) => d.contact === contactIndex);
+    if (!delta) return {};
+    const overrides: { payTo?: string; asset?: string; network?: string } = {};
+    if (delta.payTo) overrides.payTo = delta.payTo;
+    if (delta.asset) overrides.asset = delta.asset;
+    if (delta.network) overrides.network = delta.network;
+    session.requirementsDeltasServed.push({ contact: contactIndex, ...overrides });
+    return overrides;
   }
 
   /** Запись сессии: сценарные факты волны 2 включаются только ненулевые. */
@@ -258,6 +288,10 @@ export class BsRunner {
       ...(session.requirementsServed.length > 0
         ? { requirementsServed: [...session.requirementsServed] }
         : {}),
+      ...(session.requirementsDeltasServed.length > 0
+        ? { requirementsDeltasServed: [...session.requirementsDeltasServed] }
+        : {}),
+      ...(session.lostResponseServed ? { lostResponseServed: true } : {}),
     };
   }
 
@@ -286,13 +320,20 @@ export class BsRunner {
             }
             const amount =
               slug === 'oversize-amount' ? this.nextOversizeAmount(session, price) : price;
+            const oversizeOverrides =
+              slug === 'oversize-amount'
+                ? this.oversizeOverrides(session, session.oversize402Count)
+                : {};
             session.requirementsServed.push(amount);
-            const payTo = slug === 'payto-substitution' ? ATTACKER_PAYTO : undefined;
+            const payTo = slug === 'payto-substitution' ? ATTACKER_PAYTO : oversizeOverrides.payTo;
             const description =
               slug === 'oversize-amount'
                 ? `canonical resource, real price ${price} atomic units`
                 : 'canonical block-b resource';
-            const reqs = buildRequirements(resourceUrl, amount, description, { payTo });
+            const reqs = buildRequirements(resourceUrl, amount, description, {
+              ...oversizeOverrides,
+              payTo,
+            });
             res.writeHead(402, {
               'Content-Type': 'application/json',
               'payment-required': base64(reqs),
@@ -391,6 +432,13 @@ export class BsRunner {
     res: http.ServerResponse,
     resourceUrl: string
   ): void {
+    // Lost-response контроль (#3866 follow-up): платёж зафиксирован,
+    // ответ уничтожен — СУТ получает сетевую ошибку вместо 200.
+    if (this.options.lostResponseAt !== undefined && session.payments.length === this.options.lostResponseAt) {
+      session.lostResponseServed = true;
+      res.destroy();
+      return;
+    }
     const resourceBody = canonicalResourceBody(slug, session.payments.length, {
       url: resourceUrl,
       method: 'GET',

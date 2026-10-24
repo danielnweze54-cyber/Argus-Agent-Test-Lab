@@ -47,7 +47,7 @@ import {
   type FundingProvider,
   type FundingReport,
 } from '../blockb/FundingProvider';
-import type { BcAttemptObservation, RunnerReport, ScenarioRunResult } from '../blockb/runners/BlockBRunnerTypes';
+import type { BcAttemptObservation, RunnerReport, RequirementFieldDelta, ScenarioRunResult } from '../blockb/runners/BlockBRunnerTypes';
 import { assertScenarioMatchesConfig, computeExitCode, worstVerdict } from '../blockb/runners/BlockBRunnerTypes';
 import type { SigningBinding } from '../adapters/payment/SigningBinding';
 
@@ -77,6 +77,11 @@ interface BlockBFlags {
   /** Пробы S-BS-06 (follow-up #3866): суммы requirements на каждый 402-контакт,
    *  через запятую ('10000,100000'; последний повторяется). BS-семейство. */
   requirementAmounts?: string;
+  /** Пробы S-BS-06 binding-контроль (#3866): JSON-массив дельт полей
+   *  '[{"contact":2,"payTo":"0x…"}]'. BS-семейство. */
+  requirementDeltas?: string;
+  /** Lost-response контроль: N-й платёж остаётся без ответа (сокет рвётся). */
+  lostResponseAt?: number;
 }
 
 const USAGE = [
@@ -89,6 +94,8 @@ const USAGE = [
   '       --facilitator-settle-url URL (S-BC-14 frontrun-drain: settle фасилитатора СУТ)',
   '       --funding auto|manual --faucet-url URL --rpc-url URL [--funding-min-atomic N] (BC, решение В3)',
   '       --requirement-amounts A1,A2 (BS S-BS-06 probes: sums per 402 contact; env ARGUS_B_REQUIREMENT_AMOUNTS)',
+  '       --requirement-deltas JSON (BS S-BS-06 binding probes: [{"contact":2,"payTo|asset|network":value}]; env ARGUS_B_REQUIREMENT_DELTAS)',
+  '       --lost-response-at N (BS lost-response control: Nth payment gets no response; env ARGUS_B_LOST_RESPONSE_AT)',
   'Env:   ARGUS_B_SUT_URL, ARGUS_B_BIND, ARGUS_TEST_WALLET_PRIVATE_KEY,',
   '       ARGUS_B_FACILITATOR_SETTLE_URL, ARGUS_B_FUNDING, ARGUS_B_FAUCET_URL, ARGUS_B_RPC_URL',
 ].join('\n');
@@ -166,6 +173,12 @@ export function parseBlockBArgs(argv: string[]): BlockBFlags {
       case '--requirement-amounts':
         flags.requirementAmounts = next();
         break;
+      case '--requirement-deltas':
+        flags.requirementDeltas = next();
+        break;
+      case '--lost-response-at':
+        flags.lostResponseAt = Number.parseInt(next(), 10);
+        break;
       default:
         throw new Error(`Unknown flag '${flag}'\n${USAGE}`);
     }
@@ -192,6 +205,63 @@ export function parseAmountsList(raw: string | undefined): readonly string[] | u
     }
   }
   return parts;
+}
+
+const HEX_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+/**
+ * Binding-дельты для проб S-BS-06 (follow-up #3866): JSON-массив вида
+ * '[{"contact":2,"payTo":"0x…"}]'. Валидация: contact — целое ≥ 1;
+ * хотя бы одно поле из payTo/asset/network; payTo/asset — 0x-адрес (40 hex);
+ * network — непустая строка. Неизвестные поля — ошибка.
+ */
+export function parseRequirementDeltas(
+  raw: string | undefined
+): readonly RequirementFieldDelta[] | undefined {
+  if (!raw || raw.trim().length === 0) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`--requirement-deltas: ожидается JSON-массив, получено '${raw}'`);
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error(`--requirement-deltas: ожидается непустой JSON-массив дельт`);
+  }
+  return parsed.map((entry, i): RequirementFieldDelta => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw new Error(`--requirement-deltas[${i}]: ожидается объект {contact, payTo?|asset?|network?}`);
+    }
+    const rec = entry as Record<string, unknown>;
+    const known = Object.keys(rec).filter((k) => k !== 'contact' && k !== 'payTo' && k !== 'asset' && k !== 'network');
+    if (known.length > 0) {
+      throw new Error(`--requirement-deltas[${i}]: неизвестные поля: ${known.join(', ')}`);
+    }
+    const contact = rec['contact'];
+    if (typeof contact !== 'number' || !Number.isInteger(contact) || contact < 1) {
+      throw new Error(`--requirement-deltas[${i}]: 'contact' — целое ≥ 1, получено '${String(contact)}'`);
+    }
+    const payTo = rec['payTo'];
+    const asset = rec['asset'];
+    const network = rec['network'];
+    if (payTo === undefined && asset === undefined && network === undefined) {
+      throw new Error(`--requirement-deltas[${i}]: нужен хотя бы один из payTo/asset/network`);
+    }
+    for (const [field, value] of [['payTo', payTo], ['asset', asset]] as const) {
+      if (value !== undefined && (typeof value !== 'string' || !HEX_ADDRESS_RE.test(value))) {
+        throw new Error(`--requirement-deltas[${i}]: '${field}' — 0x-адрес (40 hex), получено '${String(value)}'`);
+      }
+    }
+    if (network !== undefined && (typeof network !== 'string' || network.trim().length === 0)) {
+      throw new Error(`--requirement-deltas[${i}]: 'network' — непустая строка`);
+    }
+    return {
+      contact,
+      ...(payTo !== undefined ? { payTo: payTo as string } : {}),
+      ...(asset !== undefined ? { asset: asset as string } : {}),
+      ...(network !== undefined ? { network: network as string } : {}),
+    };
+  });
 }
 
 /** Подписант честного/плохого клиента на ключе оператора (viem). */
@@ -601,6 +671,14 @@ async function runBsScenario(
       oversizeSequence: parseAmountsList(
         flags.requirementAmounts ?? process.env.ARGUS_B_REQUIREMENT_AMOUNTS
       ),
+      oversizeFieldDeltas: parseRequirementDeltas(
+        flags.requirementDeltas ?? process.env.ARGUS_B_REQUIREMENT_DELTAS
+      ),
+      lostResponseAt:
+        flags.lostResponseAt ??
+        (process.env.ARGUS_B_LOST_RESPONSE_AT
+          ? Number.parseInt(process.env.ARGUS_B_LOST_RESPONSE_AT, 10)
+          : undefined),
       observeWindowMs: flags.observeWindowMs,
       firstRequestTimeoutMs: flags.firstRequestTimeoutMs,
     });

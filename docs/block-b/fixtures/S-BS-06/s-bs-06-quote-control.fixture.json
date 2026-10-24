@@ -1,5 +1,5 @@
 {
-  "fixture": "S-BS-06 quote-change control (reviewer remark: accepted quote vs higher requirement on retry)",
+  "fixture": "S-BS-06 quote-change control (reviewer remark: accepted quote vs raised requirement on the next 402 contact). NAMING (2026-10-24, reviewer remark): C2 = raised-requirement second PAID cycle — two completed, deliberately served request cycles, both settled at the stand; NOT an uncertain retry of one operation. Lost-response recovery is a separate control: L1-CTL in s-bs-06-binding-controls.fixture.json",
   "upstream_issue": "https://github.com/x402-foundation/x402/issues/3866",
   "evidence_discipline": {
     "established": "the client SIGNED and handed over an EIP-3009 transferWithAuthorization for the offered amount (signer-call counts and values captured at the signer boundary)",

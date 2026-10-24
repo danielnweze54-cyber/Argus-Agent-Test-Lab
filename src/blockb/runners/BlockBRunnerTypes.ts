@@ -47,6 +47,18 @@ export interface BcAttemptObservation {
   readonly error?: string;
 }
 
+/**
+ * Пробы S-BS-06 (follow-up #3866, binding-контроль): точечное изменение
+ * ОДНОГО привязанного поля requirements на выбранном 402-контакте.
+ * contact — 1-based номер 402-контакта в сессии.
+ */
+export interface RequirementFieldDelta {
+  readonly contact: number;
+  readonly payTo?: string;
+  readonly asset?: string;
+  readonly network?: string;
+}
+
 /** Раскодированный платёж СУТ, принятый плохим сервером (семейство BS). */
 export interface BsReceivedPayment {
   readonly seq: number;
@@ -84,6 +96,10 @@ export interface BsSessionRecord {
   readonly freeResourceServed?: boolean;
   /** Пробы S-BS-06 (follow-up #3866): суммы requirements, отданные на каждый 402-контакт. */
   readonly requirementsServed?: readonly string[];
+  /** Пробы S-BS-06 (binding-контроль): дельты полей, фактически отданные на контактах. */
+  readonly requirementsDeltasServed?: readonly RequirementFieldDelta[];
+  /** Lost-response контроль: ответ 200 после платежа уничтожен (не доставлен СУТ). */
+  readonly lostResponseServed?: boolean;
   readonly error?: string;
 }
 

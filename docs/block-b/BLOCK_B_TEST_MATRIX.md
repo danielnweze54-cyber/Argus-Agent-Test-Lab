@@ -256,6 +256,30 @@ client-side guard engaged was the spend cap (`maxAmountPerPayment`), no
 price validation. Filed upstream:
 <https://github.com/x402-foundation/x402/issues/3866>.
 
+**Capture notes v3 (2026-10-24, binding controls per reviewer remarks).**
+Client `client_v3.ts` (identical to client_v2.ts plus `REQUEST_PATHS`, one
+resource path per cycle; client_v2.ts remains byte-identical to its recorded
+SHA-256), all sessions in control mode with `EXPECTED_PRICE_ATOMIC=10000`:
+(C1-CTL) the unchanged accepted quote in CONTROL mode — both cycles paid,
+signer calls 2, zero rejections: the gate preserves unchanged-quote
+acceptance; (D1-CTL) recipient changed on contact 2 — rejected BEFORE the
+signer with the field named (`quote_mismatch_vs_accepted: payTo …`), signer
+calls 1, unsigned `would_have_signed` captured; (D2-CTL / D3-CTL) asset /
+network changed on contact 2 — rejected BEFORE the signer by the OFFICIAL
+STACK's spendControls (asset allowlist, network-scoped), upstream of the
+gate, signer calls 1: honest attribution — the asset/network binding is
+already enforced by the official client v2.28.0, the gate's check is the
+second layer; (R1-CTL) resource/call changed (cycle 2 on `/weather2`) — the
+accepted `/weather` quote does NOT leak: fresh (method, url) ledger entry,
+rejected BEFORE the signer by the caller's expectation
+(`caller_expectation_mismatch`), signer calls 1; (L1-CTL) lost-response
+recovery as a SEPARATE control — payment 1 recorded at the stand, 200
+response destroyed, NO quote_accepted (ledger 0), recovery cycle served at
+100000 is rejected BEFORE the signer by the caller's expectation: no silent
+re-sign for the uncertain operation. Sanitized fixture:
+`docs/block-b/fixtures/S-BS-06/s-bs-06-binding-controls.fixture.json`
+(runner knobs: `--requirement-deltas`, `--lost-response-at`).
+
 **Capture notes v2 (2026-10-22, reviewer follow-up).** Evidence
 distinction kept in every summary: the captures establish that the client
 SIGNED AND HANDED OVER an authorization for the higher amount; the mocked
@@ -264,7 +288,11 @@ key; with a compliant facilitator the authorization would settle as-is).
 Sanitized fixtures pinned to the tested version:
 `docs/block-b/fixtures/S-BS-06/`. Probe sessions (`--requirement-amounts`
 + instrumented client): (C1) an unchanged accepted quote still works;
-(C2) after an accepted quote at 10000, a ×10 retry requirement is signed
+(C2 — renamed 2026-10-24 per reviewer remark: a RAISED-REQUIREMENT SECOND
+PAID CYCLE — two completed, deliberately served request cycles, both
+settled at the stand, NOT an uncertain retry of one operation; lost-response
+recovery is the separate L1-CTL control, capture notes v3) after an
+accepted quote at 10000, a ×10 requirement on the next contact is signed
 for 100000 — no binding check (defect root); (C2-CTL) the proposed
 control rejects the change BEFORE invoking the signer (signer-call count
 1 vs 2), bound to resource/call, network, asset and recipient; (H1) a

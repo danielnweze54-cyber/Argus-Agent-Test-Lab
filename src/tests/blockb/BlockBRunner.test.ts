@@ -18,7 +18,7 @@ import { createBcRunner, type DrainProbe, type PaymentSigner } from '../../block
 import { makeFacilitatorDrainProbe } from '../../blockb/runners/FacilitatorDrainProbe';
 import { BsRunner } from '../../blockb/runners/BsRunner';
 import { computeExitCode, worstVerdict, type BcAttemptObservation, type BcSendRecord } from '../../blockb/runners/BlockBRunnerTypes';
-import { parseAmountsList, parseBlockBArgs, runBlockBCommand } from '../../cli/blockBCommand';
+import { parseAmountsList, parseBlockBArgs, parseRequirementDeltas, runBlockBCommand } from '../../cli/blockBCommand';
 import type { SigningBinding } from '../../adapters/payment/SigningBinding';
 import type { BlockBScenarioSpec } from '../../blockb/BlockBScenario';
 
@@ -845,6 +845,110 @@ describe('BsRunner probe knob: oversizeSequence (S-BS-06 follow-up #3866)', () =
     expect(() => parseAmountsList('10000,abc')).toThrow();
     expect(() => parseAmountsList('10000,0')).toThrow();
     expect(() => parseAmountsList('10000,-5')).toThrow();
+  });
+});
+
+describe('BsRunner binding-контроль: дельты полей и lost-response (#3866 follow-up)', () => {
+  it('дельта на контакте 2 меняет ровно указанные поля requirements; факт фиксируется', async () => {
+    const spec = getBlockBScenario('S-BS-06')!;
+    const runner = new BsRunner({
+      runConfig: { family: 'BS', sutRole: 'client', argusServerUrl: 'http://127.0.0.1:0', label: 'test' },
+      scenario: spec,
+      oversizeSequence: ['10000', '10000'],
+      oversizeFieldDeltas: [
+        { contact: 2, payTo: '0x2222222222222222222222222222222222222222', asset: '0x3333333333333333333333333333333333333333', network: 'eip155:1' },
+      ],
+      observeWindowMs: 300,
+      firstRequestTimeoutMs: 2000,
+    });
+    const sessionPromise = runner.runSession();
+    let url = runner.getActualUrl();
+    const deadline = Date.now() + 2000;
+    while (!url && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      url = runner.getActualUrl();
+    }
+    if (!url) throw new Error('BS server did not start');
+    const readReqs = async () => {
+      const res = await fetch(url!, { method: 'GET' });
+      expect(res.status).toBe(402);
+      const pr = res.headers.get('payment-required')!;
+      return JSON.parse(Buffer.from(pr, 'base64').toString('utf-8')) as {
+        accepts: { amount: string; payTo: string; asset: string; network: string }[];
+      };
+    };
+    const c1 = await readReqs();
+    expect(c1.accepts[0]!.payTo).toBe('0x9999999999999999999999999999999999999999');
+    expect(c1.accepts[0]!.asset).toBe('0x036CbD53842c5426634e7929541eC2318f3dCF7e');
+    expect(c1.accepts[0]!.network).toBe('eip155:84532');
+    const c2 = await readReqs();
+    expect(c2.accepts[0]!.amount).toBe('10000');
+    expect(c2.accepts[0]!.payTo).toBe('0x2222222222222222222222222222222222222222');
+    expect(c2.accepts[0]!.asset).toBe('0x3333333333333333333333333333333333333333');
+    expect(c2.accepts[0]!.network).toBe('eip155:1');
+    const session = await sessionPromise;
+    expect(session.requirementsDeltasServed).toEqual([
+      { contact: 2, payTo: '0x2222222222222222222222222222222222222222', asset: '0x3333333333333333333333333333333333333333', network: 'eip155:1' },
+    ]);
+  });
+
+  it('lost-response-at 1: платёж зафиксирован, ответ уничтожен (lostResponseServed)', async () => {
+    const spec = getBlockBScenario('S-BS-06')!;
+    const runner = new BsRunner({
+      runConfig: { family: 'BS', sutRole: 'client', argusServerUrl: 'http://127.0.0.1:0', label: 'test' },
+      scenario: spec,
+      oversizeSequence: ['10000', '100000'],
+      lostResponseAt: 1,
+      observeWindowMs: 300,
+      firstRequestTimeoutMs: 2000,
+    });
+    const sessionPromise = runner.runSession();
+    let url = runner.getActualUrl();
+    const deadline = Date.now() + 2000;
+    while (!url && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      url = runner.getActualUrl();
+    }
+    if (!url) throw new Error('BS server did not start');
+    // Контакт 1: 402 без платежа.
+    const res402 = await fetch(url!, { method: 'GET' });
+    expect(res402.status).toBe(402);
+    // Платёж 1: сервер фиксирует факт и уничтожает сокет без ответа.
+    const payment = Buffer.from(
+      JSON.stringify({ payload: { authorization: { nonce: '0x1', value: '10000' } } }),
+      'utf-8'
+    ).toString('base64');
+    let destroyed = false;
+    try {
+      await fetch(url!, { method: 'GET', headers: { 'payment-signature': payment } });
+    } catch {
+      destroyed = true; // сетевая ошибка — ожидаемый исход (ECONNRESET)
+    }
+    const session = await sessionPromise;
+    expect(session.payments).toHaveLength(1);
+    expect(session.payments[0]!.value).toBe('10000');
+    expect(session.lostResponseServed).toBe(true);
+    expect(destroyed).toBe(true);
+  });
+
+  it('parseRequirementDeltas: парсит и валидирует JSON-дельты', () => {
+    expect(
+      parseRequirementDeltas('[{"contact":2,"payTo":"0x2222222222222222222222222222222222222222"}]')
+    ).toEqual([{ contact: 2, payTo: '0x2222222222222222222222222222222222222222' }]);
+    expect(parseRequirementDeltas(undefined)).toBeUndefined();
+    expect(parseRequirementDeltas('')).toBeUndefined();
+    expect(parseRequirementDeltas('  ')).toBeUndefined();
+    expect(() => parseRequirementDeltas('not-json')).toThrow();
+    expect(() => parseRequirementDeltas('{}')).toThrow();
+    expect(() => parseRequirementDeltas('[]')).toThrow();
+    expect(() => parseRequirementDeltas('[{"contact":0,"payTo":"0x2222222222222222222222222222222222222222"}]')).toThrow();
+    expect(() => parseRequirementDeltas('[{"contact":2}]')).toThrow();
+    expect(() => parseRequirementDeltas('[{"contact":2,"payTo":"0x222"}]')).toThrow();
+    expect(() => parseRequirementDeltas('[{"contact":2,"network":""}]')).toThrow();
+    expect(() => parseRequirementDeltas('[{"contact":2,"foo":"bar"}]')).toThrow();
+    expect(
+      parseRequirementDeltas('[{"contact":3,"network":"eip155:1"}]')
+    ).toEqual([{ contact: 3, network: 'eip155:1' }]);
   });
 });
 
