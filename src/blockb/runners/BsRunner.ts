@@ -286,18 +286,6 @@ export class BsRunner {
   }
 
   /**
-   * Батарея биндинга S-BS-06 (seal #0003): оверрайд полей для 402-контакта
-   * contactIndex (0-based; индекс = позиция требования по порядку, последний
-   * элемент последовательности повторяется). Пустые слоты — без изменений.
-   */
-  private nextOverride(contactIndex: number): RequirementOverride | undefined {
-    const seq = this.options.requirementOverrides;
-    if (!seq || seq.length === 0) return undefined;
-    const idx = Math.min(contactIndex, seq.length - 1);
-    return seq[idx];
-  }
-
-  /**
    * Binding-дельты (#3866): оверрайды привязанных полей для 402-контакта
    * contactIndex (1-based). Факт дельты фиксируется в сессии.
    */

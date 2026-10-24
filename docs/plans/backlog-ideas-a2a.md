@@ -184,13 +184,13 @@ Do not:
 
 - promote ideas into the roadmap automatically;
 - assign phases without a separate decision;
-- duplicate these ideas into `docs/backlog-open-decisions.md`.
+- duplicate these ideas into `docs/plans/backlog-open-decisions.md`.
 
-`docs/backlog-open-decisions.md` has a strict decision-state format (RESOLVED / DEFERRED-TO-PHASE / DECISION-REQUIRED / WONTFIX). This document intentionally uses a freer idea format.
+`docs/plans/backlog-open-decisions.md` has a strict decision-state format (RESOLVED / DEFERRED-TO-PHASE / DECISION-REQUIRED / WONTFIX). This document intentionally uses a freer idea format.
 
 ## Review rule
 
-When an idea becomes relevant to active work, move it into `docs/backlog-open-decisions.md` as `DECISION-REQUIRED` or `DEFERRED-TO-PHASE` before implementation.
+When an idea becomes relevant to active work, move it into `docs/plans/backlog-open-decisions.md` as `DECISION-REQUIRED` or `DEFERRED-TO-PHASE` before implementation.
 
 ## Current work boundary
 
