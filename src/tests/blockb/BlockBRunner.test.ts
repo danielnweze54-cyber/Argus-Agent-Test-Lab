@@ -16,9 +16,9 @@ import {
 } from '../../blockb/BlockBRegistry';
 import { createBcRunner, type DrainProbe, type PaymentSigner } from '../../blockb/runners/BcRunner';
 import { makeFacilitatorDrainProbe } from '../../blockb/runners/FacilitatorDrainProbe';
-import { BsRunner } from '../../blockb/runners/BsRunner';
+import { BsRunner, decodePayment } from '../../blockb/runners/BsRunner';
 import { computeExitCode, worstVerdict, type BcAttemptObservation, type BcSendRecord } from '../../blockb/runners/BlockBRunnerTypes';
-import { parseAmountsList, parseBlockBArgs, runBlockBCommand } from '../../cli/blockBCommand';
+import { parseAmountsList, parseBlockBArgs, parseMaliciousFirstAccept, parseRequirementDeltas, runBlockBCommand } from '../../cli/blockBCommand';
 import type { SigningBinding } from '../../adapters/payment/SigningBinding';
 import type { BlockBScenarioSpec } from '../../blockb/BlockBScenario';
 
@@ -27,12 +27,12 @@ const PAY_TO = '0x9999999999999999999999999999999999999999';
 
 /* ------------------------------ Реестр ------------------------------ */
 
-describe('Block B registry (waves 1+2)', () => {
-  it('валиден, содержит 28 сценариев (10 волны 1 + 18 волны 2)', () => {
+describe('Block B registry (waves 1+2+3)', () => {
+  it('валиден, содержит 31 сценарий (10 + 18 + 3 переноса демо)', () => {
     expect(() => validateBlockBRegistry()).not.toThrow();
     const ids = listBlockBScenarios().map((s) => s.id);
-    expect(ids).toHaveLength(28);
-    expect(new Set(ids).size).toBe(28);
+    expect(ids).toHaveLength(31);
+    expect(new Set(ids).size).toBe(31);
     expect(ids).toEqual(
       expect.arrayContaining([
         'S-BC-01', 'S-BC-02', 'S-BC-04', 'S-BC-05', 'S-BC-09',
@@ -49,6 +49,14 @@ describe('Block B registry (waves 1+2)', () => {
     // Фаза 2 только у отцепляемых S-BC-14/S-BC-15.
     const phase2 = listBlockBScenarios().filter((s) => s.phase === 2).map((s) => s.id);
     expect(phase2).toEqual(['S-BC-14', 'S-BC-15']);
+  });
+
+  it('волна 3: переносы демо-сценариев S-BS-16/17/18 зарегистрированы', () => {
+    expect(getBlockBScenario('S-BS-16')?.slug).toBe('delivery-uncertain-x402');
+    expect(getBlockBScenario('S-BS-17')?.slug).toBe('over-budget-x402');
+    expect(getBlockBScenario('S-BS-18')?.slug).toBe('first-accept-wins');
+    const wave3 = listBlockBScenarios().filter((s) => s.wave === 3).map((s) => s.id);
+    expect(wave3).toEqual(['S-BS-16', 'S-BS-17', 'S-BS-18']);
   });
 
   it('поиск по ID и семействам', () => {
@@ -845,6 +853,272 @@ describe('BsRunner probe knob: oversizeSequence (S-BS-06 follow-up #3866)', () =
     expect(() => parseAmountsList('10000,abc')).toThrow();
     expect(() => parseAmountsList('10000,0')).toThrow();
     expect(() => parseAmountsList('10000,-5')).toThrow();
+  });
+});
+
+describe('BsRunner binding-контроль: дельты полей и lost-response (#3866 follow-up)', () => {
+  it('дельта на контакте 2 меняет ровно указанные поля requirements; факт фиксируется', async () => {
+    const spec = getBlockBScenario('S-BS-06')!;
+    const runner = new BsRunner({
+      runConfig: { family: 'BS', sutRole: 'client', argusServerUrl: 'http://127.0.0.1:0', label: 'test' },
+      scenario: spec,
+      oversizeSequence: ['10000', '10000'],
+      oversizeFieldDeltas: [
+        { contact: 2, payTo: '0x2222222222222222222222222222222222222222', asset: '0x3333333333333333333333333333333333333333', network: 'eip155:1' },
+      ],
+      observeWindowMs: 300,
+      firstRequestTimeoutMs: 2000,
+    });
+    const sessionPromise = runner.runSession();
+    let url = runner.getActualUrl();
+    const deadline = Date.now() + 2000;
+    while (!url && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      url = runner.getActualUrl();
+    }
+    if (!url) throw new Error('BS server did not start');
+    const readReqs = async () => {
+      const res = await fetch(url!, { method: 'GET' });
+      expect(res.status).toBe(402);
+      const pr = res.headers.get('payment-required')!;
+      return JSON.parse(Buffer.from(pr, 'base64').toString('utf-8')) as {
+        accepts: { amount: string; payTo: string; asset: string; network: string }[];
+      };
+    };
+    const c1 = await readReqs();
+    expect(c1.accepts[0]!.payTo).toBe('0x9999999999999999999999999999999999999999');
+    expect(c1.accepts[0]!.asset).toBe('0x036CbD53842c5426634e7929541eC2318f3dCF7e');
+    expect(c1.accepts[0]!.network).toBe('eip155:84532');
+    const c2 = await readReqs();
+    expect(c2.accepts[0]!.amount).toBe('10000');
+    expect(c2.accepts[0]!.payTo).toBe('0x2222222222222222222222222222222222222222');
+    expect(c2.accepts[0]!.asset).toBe('0x3333333333333333333333333333333333333333');
+    expect(c2.accepts[0]!.network).toBe('eip155:1');
+    const session = await sessionPromise;
+    expect(session.requirementsDeltasServed).toEqual([
+      { contact: 2, payTo: '0x2222222222222222222222222222222222222222', asset: '0x3333333333333333333333333333333333333333', network: 'eip155:1' },
+    ]);
+  });
+
+  it('lost-response-at 1: платёж зафиксирован, ответ уничтожен (lostResponseServed)', async () => {
+    const spec = getBlockBScenario('S-BS-06')!;
+    const runner = new BsRunner({
+      runConfig: { family: 'BS', sutRole: 'client', argusServerUrl: 'http://127.0.0.1:0', label: 'test' },
+      scenario: spec,
+      oversizeSequence: ['10000', '100000'],
+      lostResponseAt: 1,
+      observeWindowMs: 300,
+      firstRequestTimeoutMs: 2000,
+    });
+    const sessionPromise = runner.runSession();
+    let url = runner.getActualUrl();
+    const deadline = Date.now() + 2000;
+    while (!url && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      url = runner.getActualUrl();
+    }
+    if (!url) throw new Error('BS server did not start');
+    // Контакт 1: 402 без платежа.
+    const res402 = await fetch(url!, { method: 'GET' });
+    expect(res402.status).toBe(402);
+    // Платёж 1: сервер фиксирует факт и уничтожает сокет без ответа.
+    const payment = Buffer.from(
+      JSON.stringify({ payload: { authorization: { nonce: '0x1', value: '10000' } } }),
+      'utf-8'
+    ).toString('base64');
+    let destroyed = false;
+    try {
+      await fetch(url!, { method: 'GET', headers: { 'payment-signature': payment } });
+    } catch {
+      destroyed = true; // сетевая ошибка — ожидаемый исход (ECONNRESET)
+    }
+    const session = await sessionPromise;
+    expect(session.payments).toHaveLength(1);
+    expect(session.payments[0]!.value).toBe('10000');
+    expect(session.lostResponseServed).toBe(true);
+    expect(destroyed).toBe(true);
+  });
+
+  it('parseRequirementDeltas: парсит и валидирует JSON-дельты', () => {
+    expect(
+      parseRequirementDeltas('[{"contact":2,"payTo":"0x2222222222222222222222222222222222222222"}]')
+    ).toEqual([{ contact: 2, payTo: '0x2222222222222222222222222222222222222222' }]);
+    expect(parseRequirementDeltas(undefined)).toBeUndefined();
+    expect(parseRequirementDeltas('')).toBeUndefined();
+    expect(parseRequirementDeltas('  ')).toBeUndefined();
+    expect(() => parseRequirementDeltas('not-json')).toThrow();
+    expect(() => parseRequirementDeltas('{}')).toThrow();
+    expect(() => parseRequirementDeltas('[]')).toThrow();
+    expect(() => parseRequirementDeltas('[{"contact":0,"payTo":"0x2222222222222222222222222222222222222222"}]')).toThrow();
+    expect(() => parseRequirementDeltas('[{"contact":2}]')).toThrow();
+    expect(() => parseRequirementDeltas('[{"contact":2,"payTo":"0x222"}]')).toThrow();
+    expect(() => parseRequirementDeltas('[{"contact":2,"network":""}]')).toThrow();
+    expect(() => parseRequirementDeltas('[{"contact":2,"foo":"bar"}]')).toThrow();
+    expect(
+      parseRequirementDeltas('[{"contact":3,"network":"eip155:1"}]')
+    ).toEqual([{ contact: 3, network: 'eip155:1' }]);
+  });
+});
+
+describe('Волна 3: переносы демо-сценариев (S10/S11/S-ZS-02 -> x402)', () => {
+  /** Читает 402-requirements от поднятого BS-сервера. */
+  const startRunner = async (opts: ConstructorParameters<typeof BsRunner>[0]) => {
+    const runner = new BsRunner(opts);
+    const sessionPromise = runner.runSession();
+    let url = runner.getActualUrl();
+    const deadline = Date.now() + 2000;
+    while (!url && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      url = runner.getActualUrl();
+    }
+    if (!url) throw new Error('BS server did not start');
+    return { runner, sessionPromise, url: url! };
+  };
+
+  const REQ = (body: { payload: { authorization: Record<string, unknown> } }) =>
+    Buffer.from(JSON.stringify(body), 'utf-8').toString('base64');
+
+  it('S-BS-18: malicious-требование вставлено ПЕРВЫМ в accepts[], канон — вторым; факт фиксируется', async () => {
+    const spec = getBlockBScenario('S-BS-18')!;
+    const { sessionPromise, url } = await startRunner({
+      runConfig: { family: 'BS', sutRole: 'client', argusServerUrl: 'http://127.0.0.1:0', label: 'test' },
+      scenario: spec,
+      oversizeSequence: ['10000', '10000'],
+      maliciousFirstAccept: { contact: 1, payTo: '0x6666666666666666666666666666666666666666' },
+      observeWindowMs: 300,
+      firstRequestTimeoutMs: 2000,
+    });
+    const res = await fetch(url, { method: 'GET' });
+    expect(res.status).toBe(402);
+    const reqs = JSON.parse(Buffer.from(res.headers.get('payment-required')!, 'base64').toString('utf-8')) as {
+      accepts: { amount: string; payTo: string }[];
+    };
+    expect(reqs.accepts).toHaveLength(2);
+    expect(reqs.accepts[0]!.payTo).toBe('0x6666666666666666666666666666666666666666');
+    expect(reqs.accepts[0]!.amount).toBe('10000');
+    expect(reqs.accepts[1]!.payTo).toBe('0x9999999999999999999999999999999999999999');
+    const session = await sessionPromise;
+    expect(session.maliciousFirstAcceptServed).toEqual([
+      { contact: 1, payTo: '0x6666666666666666666666666666666666666666' },
+    ]);
+  });
+
+  it('S-BS-18: оценщик — платёж на malicious payTo = FAIL, платежа нет = ADVISORY, кноб потерян = HARNESS_ERROR', () => {
+    const spec = getBlockBScenario('S-BS-18')!;
+    const served = [{ contact: 1, payTo: '0x6666666666666666666666666666666666666666' }];
+    expect(
+      evaluateBsSession(spec, {
+        scenarioId: 'S-BS-18', payments: [{ seq: 1, to: '0x6666666666666666666666666666666666666666', value: '10000', raw: 'x', atMs: 0 }],
+        requestCount: 2, duplicateSettleDelivered: false, observeWindowMs: 100, facts: [],
+        maliciousFirstAcceptServed: served,
+      }).verdict
+    ).toBe('FAIL');
+    expect(
+      evaluateBsSession(spec, {
+        scenarioId: 'S-BS-18', payments: [], requestCount: 2, duplicateSettleDelivered: false,
+        observeWindowMs: 100, facts: [], maliciousFirstAcceptServed: served,
+      }).verdict
+    ).toBe('ADVISORY');
+    expect(
+      evaluateBsSession(spec, {
+        scenarioId: 'S-BS-18', payments: [], requestCount: 1, duplicateSettleDelivered: false,
+        observeWindowMs: 100, facts: [],
+      }).verdict
+    ).toBe('HARNESS_ERROR');
+  });
+
+  it('S-BS-16: оценщик — два платежа с новыми nonce = FAIL, тот же nonce = ADVISORY, один = ADVISORY, без lost-response = HARNESS_ERROR', () => {
+    const spec = getBlockBScenario('S-BS-16')!;
+    const base = {
+      scenarioId: 'S-BS-16', requestCount: 3, duplicateSettleDelivered: false,
+      observeWindowMs: 100, facts: [], lostResponseServed: true,
+    };
+    expect(
+      evaluateBsSession(spec, {
+        ...base,
+        payments: [
+          { seq: 1, nonce: '0xa', value: '10000', raw: 'x', atMs: 0 },
+          { seq: 2, nonce: '0xb', value: '10000', raw: 'y', atMs: 1 },
+        ],
+      }).verdict
+    ).toBe('FAIL');
+    expect(
+      evaluateBsSession(spec, {
+        ...base,
+        payments: [
+          { seq: 1, nonce: '0xa', value: '10000', raw: 'x', atMs: 0 },
+          { seq: 2, nonce: '0xa', value: '10000', raw: 'x', atMs: 1 },
+        ],
+      }).verdict
+    ).toBe('ADVISORY');
+    expect(
+      evaluateBsSession(spec, { ...base, payments: [{ seq: 1, nonce: '0xa', value: '10000', raw: 'x', atMs: 0 }] }).verdict
+    ).toBe('ADVISORY');
+    expect(
+      evaluateBsSession(spec, { ...base, lostResponseServed: false, payments: [] }).verdict
+    ).toBe('HARNESS_ERROR');
+  });
+
+  it('S-BS-17: оценщик — платежи в пределах потолка = PASS, сверх = FAIL, без ожидания = HARNESS_ERROR', () => {
+    const spec = getBlockBScenario('S-BS-17')!;
+    const base = {
+      scenarioId: 'S-BS-17', requestCount: 3, duplicateSettleDelivered: false,
+      observeWindowMs: 100, facts: [],
+    };
+    expect(
+      evaluateBsSession(spec, {
+        ...base, payments: [{ seq: 1, value: '10000', raw: 'x', atMs: 0 }], expectedMaxPayments: 1,
+      }).verdict
+    ).toBe('PASS');
+    expect(
+      evaluateBsSession(spec, {
+        ...base,
+        payments: [
+          { seq: 1, value: '10000', raw: 'x', atMs: 0 },
+          { seq: 2, value: '10000', raw: 'y', atMs: 1 },
+        ],
+        expectedMaxPayments: 1,
+      }).verdict
+    ).toBe('FAIL');
+    expect(
+      evaluateBsSession(spec, { ...base, payments: [], expectedMaxPayments: undefined }).verdict
+    ).toBe('HARNESS_ERROR');
+  });
+
+  it('S-BS-18: malicious amount первым — оценщик ловит подпись на завышенную сумму (FAIL)', () => {
+    const spec = getBlockBScenario('S-BS-18')!;
+    const session = {
+      scenarioId: 'S-BS-18', requestCount: 2, duplicateSettleDelivered: false,
+      observeWindowMs: 100, facts: [],
+      maliciousFirstAcceptServed: [{ contact: 1, amount: '100000' }],
+      payments: [{ seq: 1, to: '0x9999999999999999999999999999999999999999', value: '100000', raw: 'x', atMs: 0 }],
+    };
+    expect(evaluateBsSession(spec, session).verdict).toBe('FAIL');
+  });
+
+  it('decodePayment: достаёт to/nonce/value из authorization', () => {
+    const raw = REQ({ payload: { authorization: { to: '0xabc0000000000000000000000000000000000abc', nonce: '0x9', value: '7000' } } });
+    expect(decodePayment(raw)).toEqual({
+      to: '0xabc0000000000000000000000000000000000abc',
+      nonce: '0x9',
+      value: '7000',
+    });
+  });
+
+  it('parseMaliciousFirstAccept: парсит и валидирует кноб S-BS-18', () => {
+    expect(parseMaliciousFirstAccept('{"contact":1,"payTo":"0x6666666666666666666666666666666666666666"}')).toEqual({
+      contact: 1,
+      payTo: '0x6666666666666666666666666666666666666666',
+    });
+    expect(parseMaliciousFirstAccept('{"contact":2,"amount":"100000"}')).toEqual({ contact: 2, amount: '100000' });
+    expect(parseMaliciousFirstAccept(undefined)).toBeUndefined();
+    expect(parseMaliciousFirstAccept('')).toBeUndefined();
+    expect(() => parseMaliciousFirstAccept('not-json')).toThrow();
+    expect(() => parseMaliciousFirstAccept('{"contact":0,"amount":"1"}')).toThrow();
+    expect(() => parseMaliciousFirstAccept('{"contact":1,"payTo":"0x6666666666666666666666666666666666666666","amount":"5"}')).toThrow();
+    expect(() => parseMaliciousFirstAccept('{"contact":1,"payTo":"0x666"}')).toThrow();
+    expect(() => parseMaliciousFirstAccept('{"contact":1,"amount":"0"}')).toThrow();
+    expect(() => parseMaliciousFirstAccept('{"contact":1,"foo":"bar"}')).toThrow();
   });
 });
 

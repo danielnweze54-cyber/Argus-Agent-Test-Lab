@@ -38,10 +38,13 @@ import http from 'http';
 import type { BlockBRunConfig, BlockBScenarioSpec } from '../../blockb';
 import type { X402PaymentRequiredBody } from '../../core/AgentTargetPort';
 import { canonicalResourceBody } from '../CanonicalResource';
-import type { BsReceivedPayment, BsSessionRecord } from './BlockBRunnerTypes';
-
-/** Атакующий payTo для S-BS-05 (валидный 0x-адрес, НЕ канонический получатель). */
-const ATTACKER_PAYTO = '0x6666666666666666666666666666666666666666';
+import type {
+  BsReceivedPayment,
+  BsSessionRecord,
+  MaliciousFirstAccept,
+  RequirementFieldDelta,
+} from './BlockBRunnerTypes';
+import { ATTACKER_PAYTO } from './BlockBRunnerTypes';
 
 /** Батарея биндинга S-BS-06 (follow-up #3866, раунд 2): пер-контактный оверрайд
  *  ПОЛЕЙ requirements. undefined поле — без изменения. Индекс = 402-контакт
@@ -62,10 +65,21 @@ export interface BsRunnerOptions {
   /** Пробы S-BS-06 (follow-up #3866): суммы requirements на каждый 402-контакт
    *  по порядку (последний элемент повторяется). Не задана — легаси price×10. */
   readonly oversizeSequence?: readonly string[];
-  /** Батарея биндинга S-BS-06: пер-контактные оверрайды полей (payTo/asset/
-   *  network/scheme/amount) — проверка заявленного биндинга quote-ledger.
-   *  Индексация как у oversizeSequence: последний элемент повторяется. */
+  /** Батарея биндинга S-BS-06 (seal #0003, 11/11): пер-контактные оверрайды
+   *  полей (payTo/asset/network/scheme/amount) — проверка заявленного биндинга
+   *  quote-ledger. Индексация как у oversizeSequence: последний повторяется. */
   readonly requirementOverrides?: readonly (RequirementOverride | undefined)[];
+  /** Пробы S-BS-06 binding-контроль (#3866): точечные изменения привязанных
+   *  полей (payTo/asset/network) на указанном 402-контакте. */
+  readonly oversizeFieldDeltas?: readonly RequirementFieldDelta[];
+  /** Lost-response контроль: 1-based номер платежа, ответ (200) на который
+   *  уничтожается после фиксации платежа (СУТ получает сетевую ошибку). */
+  readonly lostResponseAt?: number;
+  /** Проба S-BS-18 (перенос S-ZS-02): malicious-требование первым в accepts[]. */
+  readonly maliciousFirstAccept?: MaliciousFirstAccept;
+  /** Проба S-BS-17: ожидание прогона — максимум платежей, разрешённых бюджетом
+   *  вызывающего (оценщик сверяет фактические платежи сервера с этим потолком). */
+  readonly expectedMaxPayments?: number;
   /** Окно наблюдения после первого платежа, мс (дефолт 2000; CLI — 120000). */
   readonly observeWindowMs?: number;
   /** Ожидание первого запроса СУТ, мс (дефолт 30000). */
@@ -82,6 +96,9 @@ interface BsSessionInternal {
   requirementsServed: string[];
   /* Батарея биндинга S-BS-06: полный лог выданных требований (поле-уровень). */
   requirementDetails: Array<Record<string, string | undefined>>;
+  requirementsDeltasServed: RequirementFieldDelta[];
+  lostResponseServed: boolean;
+  maliciousFirstAcceptServed: MaliciousFirstAccept[];
   /* Факты сценариев волны 2 (заполняются скриптами). */
   verifyRejections: number;
   resourceEchoMismatch: boolean;
@@ -98,7 +115,7 @@ function buildRequirements(
   resourceUrl: string,
   amount: string,
   description: string,
-  overrides?: { payTo?: string }
+  overrides?: { payTo?: string; asset?: string; network?: string }
 ): X402PaymentRequiredBody {
   return {
     x402Version: 2,
@@ -106,9 +123,9 @@ function buildRequirements(
     accepts: [
       {
         scheme: 'exact',
-        network: 'eip155:84532',
+        network: overrides?.network ?? 'eip155:84532',
         amount,
-        asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        asset: overrides?.asset ?? '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
         payTo: overrides?.payTo ?? '0x9999999999999999999999999999999999999999',
         maxTimeoutSeconds: 60,
         // v2-спека: клиент строит EIP-712 домен по extra.name/extra.version;
@@ -146,14 +163,15 @@ function base64(value: unknown): string {
   return Buffer.from(JSON.stringify(value), 'utf-8').toString('base64');
 }
 
-/** Раскодировка payment-signature СУТ в факт (nonce/value). */
-export function decodePayment(rawBase64: string): { nonce?: string; value?: string } {
+/** Раскодировка payment-signature СУТ в факт (to/nonce/value). */
+export function decodePayment(rawBase64: string): { to?: string; nonce?: string; value?: string } {
   try {
     const parsed = JSON.parse(Buffer.from(rawBase64, 'base64').toString('utf-8')) as {
       accepted?: { amount?: string };
-      payload?: { authorization?: { nonce?: string; value?: string } };
+      payload?: { authorization?: { to?: string; nonce?: string; value?: string } };
     };
     return {
+      to: parsed.payload?.authorization?.to,
       nonce: parsed.payload?.authorization?.nonce,
       value: parsed.payload?.authorization?.value ?? parsed.accepted?.amount,
     };
@@ -192,6 +210,9 @@ export class BsRunner {
       oversize402Count: 0,
       requirementsServed: [],
       requirementDetails: [],
+      requirementsDeltasServed: [],
+      lostResponseServed: false,
+      maliciousFirstAcceptServed: [],
       verifyRejections: 0,
       resourceEchoMismatch: false,
       prematureReceiptServed: false,
@@ -250,7 +271,8 @@ export class BsRunner {
 
   /**
    * Сумма следующего 402 slug'а oversize-amount: пробы с секвенцией сумм
-   * (последний элемент повторяется) или легаси price×10.
+   * (последний элемент повторяется) или легаси price×10. Счётчик контактов
+   * инкрементируется всегда — от него зависят binding-дельты.
    */
   private nextOversizeAmount(session: BsSessionInternal, price: string): string {
     const seq = this.options.oversizeSequence;
@@ -259,7 +281,63 @@ export class BsRunner {
       session.oversize402Count += 1;
       return seq[idx]!;
     }
+    session.oversize402Count += 1;
     return session.oversizeAmount;
+  }
+
+  /**
+   * Батарея биндинга S-BS-06 (seal #0003): оверрайд полей для 402-контакта
+   * contactIndex (0-based; индекс = позиция требования по порядку, последний
+   * элемент последовательности повторяется). Пустые слоты — без изменений.
+   */
+  private nextOverride(contactIndex: number): RequirementOverride | undefined {
+    const seq = this.options.requirementOverrides;
+    if (!seq || seq.length === 0) return undefined;
+    const idx = Math.min(contactIndex, seq.length - 1);
+    return seq[idx];
+  }
+
+  /**
+   * Binding-дельты (#3866): оверрайды привязанных полей для 402-контакта
+   * contactIndex (1-based). Факт дельты фиксируется в сессии.
+   */
+  private oversizeOverrides(
+    session: BsSessionInternal,
+    contactIndex: number
+  ): { payTo?: string; asset?: string; network?: string } {
+    const delta = this.options.oversizeFieldDeltas?.find((d) => d.contact === contactIndex);
+    if (!delta) return {};
+    const overrides: { payTo?: string; asset?: string; network?: string } = {};
+    if (delta.payTo) overrides.payTo = delta.payTo;
+    if (delta.asset) overrides.asset = delta.asset;
+    if (delta.network) overrides.network = delta.network;
+    session.requirementsDeltasServed.push({ contact: contactIndex, ...overrides });
+    return overrides;
+  }
+
+  /**
+   * S-BS-18 (перенос S-ZS-02 secretariat, first-accept-wins): на 402-контакте
+   * contactIndex malicious-требование вставляется ПЕРВЫМ в accepts[] —
+   * каноническое остаётся вторым. Факт вставки фиксируется в сессии.
+   */
+  private maybeInjectMaliciousFirstAccept(
+    slug: string,
+    session: BsSessionInternal,
+    reqs: X402PaymentRequiredBody
+  ): void {
+    if (slug !== 'first-accept-wins') return;
+    const probe = this.options.maliciousFirstAccept;
+    if (!probe) return;
+    if (probe.contact !== session.oversize402Count) return;
+    if (!probe.payTo && !probe.amount) return;
+    const canonical = reqs.accepts[0]!;
+    const malicious = {
+      ...canonical,
+      ...(probe.payTo ? { payTo: probe.payTo } : {}),
+      ...(probe.amount ? { amount: probe.amount } : {}),
+    };
+    reqs.accepts = [malicious, canonical];
+    session.maliciousFirstAcceptServed.push(probe);
   }
 
   /** Запись сессии: сценарные факты волны 2 включаются только ненулевые. */
@@ -290,6 +368,16 @@ export class BsRunner {
       )
         ? { requirementDetails: session.requirementDetails.map((d) => ({ ...d })) }
         : {}),
+      ...(session.requirementsDeltasServed.length > 0
+        ? { requirementsDeltasServed: [...session.requirementsDeltasServed] }
+        : {}),
+      ...(session.lostResponseServed ? { lostResponseServed: true } : {}),
+      ...(session.maliciousFirstAcceptServed.length > 0
+        ? { maliciousFirstAcceptServed: [...session.maliciousFirstAcceptServed] }
+        : {}),
+      ...(this.options.expectedMaxPayments !== undefined
+        ? { expectedMaxPayments: this.options.expectedMaxPayments }
+        : {}),
     };
   }
 
@@ -317,7 +405,13 @@ export class BsRunner {
               return;
             }
             const amount =
-              slug === 'oversize-amount' ? this.nextOversizeAmount(session, price) : price;
+              slug === 'oversize-amount' || slug === 'first-accept-wins'
+                ? this.nextOversizeAmount(session, price)
+                : price;
+            const oversizeOverrides =
+              slug === 'oversize-amount' || slug === 'first-accept-wins'
+                ? this.oversizeOverrides(session, session.oversize402Count)
+                : {};
             const contactIndex = session.requirementsServed.length;
             const ov = this.nextOverride(contactIndex);
             const effAmount = ov?.amount ?? amount;
@@ -329,15 +423,22 @@ export class BsRunner {
               network: ov?.network,
               scheme: ov?.scheme,
             });
-            const payTo = ov?.payTo ?? (slug === 'payto-substitution' ? ATTACKER_PAYTO : undefined);
+            const payTo =
+              slug === 'payto-substitution'
+                ? ATTACKER_PAYTO
+                : (oversizeOverrides.payTo ?? ov?.payTo);
             const description =
               slug === 'oversize-amount'
                 ? `canonical resource, real price ${price} atomic units`
                 : 'canonical block-b resource';
-            const reqs = buildRequirements(resourceUrl, effAmount, description, { payTo });
+            const reqs = buildRequirements(resourceUrl, effAmount, description, {
+              ...oversizeOverrides,
+              payTo,
+            });
             if (ov?.asset) reqs.accepts[0]!.asset = ov.asset;
             if (ov?.network) reqs.accepts[0]!.network = ov.network;
             if (ov?.scheme) reqs.accepts[0]!.scheme = ov.scheme;
+            this.maybeInjectMaliciousFirstAccept(slug, session, reqs);
             res.writeHead(402, {
               'Content-Type': 'application/json',
               'payment-required': base64(reqs),
@@ -346,10 +447,11 @@ export class BsRunner {
             return;
           }
 
-          // Платёж СУТ: фиксируем факт (nonce/value — сырые данные отчёта).
+          // Платёж СУТ: фиксируем факт (to/nonce/value — сырые данные отчёта).
           const decoded = decodePayment(paymentHeader);
           session.payments.push({
             seq: session.payments.length + 1,
+            to: decoded.to,
             nonce: decoded.nonce,
             value: decoded.value,
             raw: paymentHeader,
@@ -436,6 +538,13 @@ export class BsRunner {
     res: http.ServerResponse,
     resourceUrl: string
   ): void {
+    // Lost-response контроль (#3866 follow-up): платёж зафиксирован,
+    // ответ уничтожен — СУТ получает сетевую ошибку вместо 200.
+    if (this.options.lostResponseAt !== undefined && session.payments.length === this.options.lostResponseAt) {
+      session.lostResponseServed = true;
+      res.destroy();
+      return;
+    }
     const resourceBody = canonicalResourceBody(slug, session.payments.length, {
       url: resourceUrl,
       method: 'GET',

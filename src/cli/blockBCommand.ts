@@ -47,7 +47,13 @@ import {
   type FundingProvider,
   type FundingReport,
 } from '../blockb/FundingProvider';
-import type { BcAttemptObservation, RunnerReport, ScenarioRunResult } from '../blockb/runners/BlockBRunnerTypes';
+import type {
+  BcAttemptObservation,
+  MaliciousFirstAccept,
+  RunnerReport,
+  RequirementFieldDelta,
+  ScenarioRunResult,
+} from '../blockb/runners/BlockBRunnerTypes';
 import { assertScenarioMatchesConfig, computeExitCode, worstVerdict } from '../blockb/runners/BlockBRunnerTypes';
 import type { SigningBinding } from '../adapters/payment/SigningBinding';
 
@@ -77,9 +83,19 @@ interface BlockBFlags {
   /** Пробы S-BS-06 (follow-up #3866): суммы requirements на каждый 402-контакт,
    *  через запятую ('10000,100000'; последний повторяется). BS-семейство. */
   requirementAmounts?: string;
-  /** Батарея биндинга S-BS-06 (раунд 2): JSON-массив пер-контактных оверрайдов
+  /** Батарея биндинга S-BS-06 (seal #0003, раунд 2): JSON-массив пер-контактных оверрайдов
    *  полей requirements [{amount?,payTo?,asset?,network?,scheme?}, ...]. */
   requirementOverrides?: string;
+  /** Пробы S-BS-06 binding-контроль (#3866): JSON-массив дельт полей
+   *  '[{"contact":2,"payTo":"0x…"}]'. BS-семейство. */
+  requirementDeltas?: string;
+  /** Lost-response контроль: N-й платёж остаётся без ответа (сокет рвётся). */
+  lostResponseAt?: number;
+  /** S-BS-18 (перенос S-ZS-02): JSON '{"contact":1,"payTo":"0x…"}' или
+   *  '{"contact":1,"amount":"100000"}' — malicious-требование первым в accepts[]. */
+  maliciousFirstAccept?: string;
+  /** S-BS-17: ожидание прогона — максимум платежей, разрешённых caller-бюджетом. */
+  expectedMaxPayments?: number;
 }
 
 const USAGE = [
@@ -93,6 +109,10 @@ const USAGE = [
   '       --funding auto|manual --faucet-url URL --rpc-url URL [--funding-min-atomic N] (BC, решение В3)',
   '       --requirement-amounts A1,A2 (BS S-BS-06 probes: sums per 402 contact; env ARGUS_B_REQUIREMENT_AMOUNTS)',
   '       --requirement-overrides \'<json>\' (BS S-BS-06 binding battery: per-contact field overrides; env ARGUS_B_REQUIREMENT_OVERRIDES)',
+  '       --requirement-deltas JSON (BS S-BS-06 binding probes: [{"contact":2,"payTo|asset|network":value}]; env ARGUS_B_REQUIREMENT_DELTAS)',
+  '       --lost-response-at N (BS lost-response control: Nth payment gets no response; env ARGUS_B_LOST_RESPONSE_AT)',
+  '       --malicious-first-accept JSON (BS S-BS-18 first-accept-wins: {"contact":1,"payTo"|"amount"}; env ARGUS_B_MALICIOUS_FIRST_ACCEPT)',
+  '       --expected-max-payments N (BS S-BS-17: max payments allowed by caller budget; env ARGUS_B_EXPECTED_MAX_PAYMENTS)',
   'Env:   ARGUS_B_SUT_URL, ARGUS_B_BIND, ARGUS_TEST_WALLET_PRIVATE_KEY,',
   '       ARGUS_B_FACILITATOR_SETTLE_URL, ARGUS_B_FUNDING, ARGUS_B_FAUCET_URL, ARGUS_B_RPC_URL',
 ].join('\n');
@@ -173,6 +193,18 @@ export function parseBlockBArgs(argv: string[]): BlockBFlags {
       case '--requirement-overrides':
         flags.requirementOverrides = next();
         break;
+      case '--requirement-deltas':
+        flags.requirementDeltas = next();
+        break;
+      case '--lost-response-at':
+        flags.lostResponseAt = Number.parseInt(next(), 10);
+        break;
+      case '--malicious-first-accept':
+        flags.maliciousFirstAccept = next();
+        break;
+      case '--expected-max-payments':
+        flags.expectedMaxPayments = Number.parseInt(next(), 10);
+        break;
       default:
         throw new Error(`Unknown flag '${flag}'\n${USAGE}`);
     }
@@ -201,8 +233,10 @@ export function parseAmountsList(raw: string | undefined): readonly string[] | u
   return parts;
 }
 
+const HEX_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
 /**
- * Батарея биндинга S-BS-06 (раунд 2): '[{"payTo":"0x..."},{"asset":"0x..."}]' →
+ * Батарея биндинга S-BS-06 (seal #0003, раунд 2): '[{"payTo":"0x..."},{"asset":"0x..."}]' →
  * массив пер-контактных оверрайдов. Пустые объекты и undefined-поля допустимы
  * (без изменений). Валидация: только известные поля, строки.
  */
@@ -237,6 +271,105 @@ export function parseRequirementOverrides(
     }
     return Object.keys(out).length > 0 ? (out as RequirementOverride) : undefined;
   });
+}
+
+/**
+ * Binding-дельты для проб S-BS-06 (follow-up #3866): JSON-массив вида
+ * '[{"contact":2,"payTo":"0x…"}]'. Валидация: contact — целое ≥ 1;
+ * хотя бы одно поле из payTo/asset/network; payTo/asset — 0x-адрес (40 hex);
+ * network — непустая строка. Неизвестные поля — ошибка.
+ */
+export function parseRequirementDeltas(
+  raw: string | undefined
+): readonly RequirementFieldDelta[] | undefined {
+  if (!raw || raw.trim().length === 0) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`--requirement-deltas: ожидается JSON-массив, получено '${raw}'`);
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error(`--requirement-deltas: ожидается непустой JSON-массив дельт`);
+  }
+  return parsed.map((entry, i): RequirementFieldDelta => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw new Error(`--requirement-deltas[${i}]: ожидается объект {contact, payTo?|asset?|network?}`);
+    }
+    const rec = entry as Record<string, unknown>;
+    const known = Object.keys(rec).filter((k) => k !== 'contact' && k !== 'payTo' && k !== 'asset' && k !== 'network');
+    if (known.length > 0) {
+      throw new Error(`--requirement-deltas[${i}]: неизвестные поля: ${known.join(', ')}`);
+    }
+    const contact = rec['contact'];
+    if (typeof contact !== 'number' || !Number.isInteger(contact) || contact < 1) {
+      throw new Error(`--requirement-deltas[${i}]: 'contact' — целое ≥ 1, получено '${String(contact)}'`);
+    }
+    const payTo = rec['payTo'];
+    const asset = rec['asset'];
+    const network = rec['network'];
+    if (payTo === undefined && asset === undefined && network === undefined) {
+      throw new Error(`--requirement-deltas[${i}]: нужен хотя бы один из payTo/asset/network`);
+    }
+    for (const [field, value] of [['payTo', payTo], ['asset', asset]] as const) {
+      if (value !== undefined && (typeof value !== 'string' || !HEX_ADDRESS_RE.test(value))) {
+        throw new Error(`--requirement-deltas[${i}]: '${field}' — 0x-адрес (40 hex), получено '${String(value)}'`);
+      }
+    }
+    if (network !== undefined && (typeof network !== 'string' || network.trim().length === 0)) {
+      throw new Error(`--requirement-deltas[${i}]: 'network' — непустая строка`);
+    }
+    return {
+      contact,
+      ...(payTo !== undefined ? { payTo: payTo as string } : {}),
+      ...(asset !== undefined ? { asset: asset as string } : {}),
+      ...(network !== undefined ? { network: network as string } : {}),
+    };
+  });
+}
+
+/**
+ * S-BS-18 (перенос S-ZS-02 secretariat, first-accept-wins): JSON-объект вида
+ * '{"contact":1,"payTo":"0x…"}' или '{"contact":1,"amount":"100000"}'.
+ * Валидация: contact — целое ≥ 1; ровно одно из payTo/amount;
+ * payTo — 0x-адрес (40 hex); amount — положительная atomic-сумма.
+ */
+export function parseMaliciousFirstAccept(raw: string | undefined): MaliciousFirstAccept | undefined {
+  if (!raw || raw.trim().length === 0) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`--malicious-first-accept: ожидается JSON-объект, получено '${raw}'`);
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`--malicious-first-accept: ожидается объект {contact, payTo|amount}`);
+  }
+  const rec = parsed as Record<string, unknown>;
+  const known = Object.keys(rec).filter((k) => k !== 'contact' && k !== 'payTo' && k !== 'amount');
+  if (known.length > 0) {
+    throw new Error(`--malicious-first-accept: неизвестные поля: ${known.join(', ')}`);
+  }
+  const contact = rec['contact'];
+  if (typeof contact !== 'number' || !Number.isInteger(contact) || contact < 1) {
+    throw new Error(`--malicious-first-accept: 'contact' — целое ≥ 1, получено '${String(contact)}'`);
+  }
+  const payTo = rec['payTo'];
+  const amount = rec['amount'];
+  if ((payTo === undefined) === (amount === undefined)) {
+    throw new Error(`--malicious-first-accept: ровно одно из payTo/amount`);
+  }
+  if (payTo !== undefined && (typeof payTo !== 'string' || !HEX_ADDRESS_RE.test(payTo))) {
+    throw new Error(`--malicious-first-accept: 'payTo' — 0x-адрес (40 hex), получено '${String(payTo)}'`);
+  }
+  if (amount !== undefined && (typeof amount !== 'string' || !/^\d+$/.test(amount) || BigInt(amount) <= 0n)) {
+    throw new Error(`--malicious-first-accept: 'amount' — положительная atomic-сумма, получено '${String(amount)}'`);
+  }
+  return {
+    contact,
+    ...(payTo !== undefined ? { payTo: payTo as string } : {}),
+    ...(amount !== undefined ? { amount: amount as string } : {}),
+  };
 }
 
 /** Подписант честного/плохого клиента на ключе оператора (viem). */
@@ -649,6 +782,22 @@ async function runBsScenario(
       requirementOverrides: parseRequirementOverrides(
         flags.requirementOverrides ?? process.env.ARGUS_B_REQUIREMENT_OVERRIDES
       ),
+      oversizeFieldDeltas: parseRequirementDeltas(
+        flags.requirementDeltas ?? process.env.ARGUS_B_REQUIREMENT_DELTAS
+      ),
+      maliciousFirstAccept: parseMaliciousFirstAccept(
+        flags.maliciousFirstAccept ?? process.env.ARGUS_B_MALICIOUS_FIRST_ACCEPT
+      ),
+      expectedMaxPayments:
+        flags.expectedMaxPayments ??
+        (process.env.ARGUS_B_EXPECTED_MAX_PAYMENTS
+          ? Number.parseInt(process.env.ARGUS_B_EXPECTED_MAX_PAYMENTS, 10)
+          : undefined),
+      lostResponseAt:
+        flags.lostResponseAt ??
+        (process.env.ARGUS_B_LOST_RESPONSE_AT
+          ? Number.parseInt(process.env.ARGUS_B_LOST_RESPONSE_AT, 10)
+          : undefined),
       observeWindowMs: flags.observeWindowMs,
       firstRequestTimeoutMs: flags.firstRequestTimeoutMs,
     });

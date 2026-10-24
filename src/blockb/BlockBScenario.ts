@@ -54,8 +54,8 @@ export interface BlockBScenarioSpec {
   readonly family: Family;
   /** Фаза 1 — ядро (работает на голом x402); фаза 2 — отцепляемые. */
   readonly phase: 1 | 2;
-  /** Волна внедрения: 1 = v1-транш (10 сценариев), 2 = остальные 18. */
-  readonly wave: 1 | 2;
+  /** Волна внедрения: 1 = v1-транш (10), 2 = остальные 18, 3 = переносы демо (3). */
+  readonly wave: 1 | 2 | 3;
   readonly title: string;
   /** Формулировка единственного намеренного отказа. */
   readonly intent: string;

@@ -1,0 +1,1879 @@
+{
+  "fixture": "Wave 3 — demo-scenario transfers to the official x402 stack (Block D S10 DeliveryUncertain -> S-BS-16, Block D S11 OverBudget -> S-BS-17, secretariat S-ZS-02 first-accept-wins -> S-BS-18)",
+  "source_scenario_note": "S10/S11 were designed and executed against agentmiddleware/amw-paypal-agent-demo (fiat rail, branch paypal-fiat-rails, seals #0001/#0002); S-ZS-02 was designed and executed against igor-vii/Zeus-Insurance-BOT zeus-secretariat (PG + mock stand). This fixture transfers each scenario to the x402 payment rail and runs it LIVE against the official @x402/* v2.28.0 client.",
+  "evidence_discipline": {
+    "established": "the client SIGNED and handed over an EIP-3009 transferWithAuthorization for the observed to/value (signer-call counts, to, value, nonce captured at the signer boundary); server-side payment captures (authorization handed over) with their nonce/value/to",
+    "not_established": "an ON-CHAIN transfer or double-spend: settlement in this harness is mocked (fault-injection stand, not a facilitator); the client wallet is an unfunded one-shot test key, so no transfer could occur; 'double charge' wording is conditional on a real settle"
+  },
+  "reproduce": {
+    "stand_cmd": "argus run --block B --family BS --json --bind 0.0.0.0:<port> --observe-window-ms 4000 --skip-gate --scenario <S-BS-16|S-BS-17|S-BS-18|S-BS-02> --requirement-amounts '<A1,A2>' [--lost-response-at N | --expected-max-payments N | --malicious-first-accept '<json>']",
+    "client_cmd": "REQUEST_CYCLES=<n> SUT_CLIENT_MODE=<observe|control> [SUT_CLIENT_BUDGET_ATOMIC=<n>] [SUT_CLIENT_ALLOWED_PAYTO=<0x…,…>] npx tsx client_v4.ts  # env: EVM_PRIVATE_KEY (one-shot unfunded), RESOURCE_SERVER_URL=http://127.0.0.1:<port>",
+    "script": "scripts/run_wave3_live.sh <session-part> (resumable, one Bash call per part)",
+    "amounts_note": "atomic units, USDC 6 decimals: 10000 = $0.01; spend-control maxAmountPerPayment=$1 = 1000000 atomic (official client default set by the harness)"
+  },
+  "versions": {
+    "note": "tested version pin",
+    "packages": {
+      "@x402/core": "2.28.0",
+      "@x402/evm": "2.28.0",
+      "@x402/express": "2.28.0",
+      "@x402/fetch": "2.28.0",
+      "viem": "2.48.11 (package-lock resolved)"
+    },
+    "runtime": "node v24.21.0",
+    "network": "Base Sepolia (eip155:84532), USDC 0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "client_sources": {
+      "sut-x402/client_v4.ts": {
+        "sha256": "7b78dc56511568c686f672c146d78b4e3fba24d560f547f578ef5cdf0e32706c",
+        "used_by": "all wave-3 sessions (v3 + budget/whitelist pre-signer hooks)"
+      },
+      "sut-x402/client_v3.ts": {
+        "sha256": "7db171dcdcec4c1c963e8c15a86250f2160a0b858e5e181fff1c83046737bd49",
+        "used_by": "base of v4; byte-identical to the 2026-10-24 binding probes"
+      },
+      "sut-x402/client_v2.ts": {
+        "sha256": "a4d2f787edf90d24de3db236158c46e5decd6b7bf3d707493882b960b97382a0",
+        "used_by": "unchanged; S-BS-06 fixtures"
+      }
+    }
+  },
+  "sessions": [
+    {
+      "session": "s10_c1",
+      "name": "S10-C1 — control: identical payment flow WITHOUT lost response (S-BS-02 late-double-charge slug, cycle 1 = 402 -> payment -> 200 + receipt + resource); the only variable vs s10_o* is the loss itself",
+      "scenario_id": "S-BS-02",
+      "role": "baseline",
+      "client_summary": {
+        "probe": "wave-3 scenario transfers (S10/S11/S-ZS-02 -> x402)",
+        "mode": "observe",
+        "client_version": "v4",
+        "paths": [
+          "/weather"
+        ],
+        "cycles": 1,
+        "signer_call_count": 1,
+        "quote_ledger_size": 1,
+        "budget_atomic": null,
+        "budget_committed_total": null,
+        "allowed_payto_count": 0,
+        "per_cycle": [
+          {
+            "cycle": 1,
+            "http": 200,
+            "receipt": {
+              "success": true,
+              "transaction": "0xabababababababababababababababababababababababababababababababab",
+              "network": "eip155:84532"
+            }
+          }
+        ],
+        "started_at": "2026-10-24T15:42:12.811Z",
+        "finished_at": "2026-10-24T15:42:12.890Z",
+        "distinction": "signed authorization captured; on-chain transfer NOT established (mocked settlement)"
+      },
+      "stand_summary": {
+        "scenario_id": "S-BS-02",
+        "slug": "late-double-charge",
+        "verdict": "PASS",
+        "reasons": [
+          "PASS (attempt 1):",
+          "платежей зафиксировано: 1; запросов: 2; окно наблюдения: 4000ms"
+        ]
+      },
+      "timeline": [
+        {
+          "at": "2026-10-24T15:38:59.102Z",
+          "type": "probe_start",
+          "mode": "observe",
+          "client_version": "v4",
+          "paths": [
+            "/weather"
+          ],
+          "cycles": 1,
+          "expected_price_atomic": null,
+          "budget_atomic": null,
+          "allowed_payto_count": 0,
+          "spend_controls": {
+            "maxAmountPerPayment": "$1"
+          },
+          "note": "settlement is mocked by the harness; captures establish signing, not on-chain transfer"
+        },
+        {
+          "at": "2026-10-24T15:38:59.103Z",
+          "type": "cycle_start",
+          "cycle": 1,
+          "url": "http://127.0.0.1:4430/weather"
+        },
+        {
+          "at": "2026-10-24T15:38:59.141Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4430/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4430/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:38:59.145Z",
+          "type": "signer_call",
+          "call_index": 1,
+          "signer_entry": "signTypedData",
+          "primary_type": "TransferWithAuthorization",
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 84532,
+            "verifyingContract": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+          },
+          "to": "0x9999999999999999999999999999999999999999",
+          "value": "10000",
+          "from": "0xC07392CFFb8A0ED3ddd863B6e3FA17fD648Ad7e8",
+          "valid_after": "0",
+          "valid_before": "1792856399",
+          "nonce": "0xafea6d39…0426(len66)"
+        },
+        {
+          "at": "2026-10-24T15:38:59.154Z",
+          "type": "cycle_result",
+          "cycle": 1,
+          "http": 200,
+          "receipt_served": {
+            "success": true,
+            "transaction": "0xabababababababababababababababababababababababababababababababab",
+            "network": "eip155:84532"
+          }
+        },
+        {
+          "at": "2026-10-24T15:38:59.154Z",
+          "type": "quote_accepted",
+          "cycle": 1,
+          "bound_to": {
+            "url": "http://127.0.0.1:4430/weather",
+            "method": "GET",
+            "scheme": "exact",
+            "network": "eip155:84532",
+            "amount": "10000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo": "0x9999999999999999999999999999999999999999"
+          },
+          "source": "server 402 accepts[0], accepted by caller at this timestamp",
+          "ledger_size": 1
+        },
+        {
+          "at": "2026-10-24T15:42:12.837Z",
+          "type": "probe_start",
+          "mode": "observe",
+          "client_version": "v4",
+          "paths": [
+            "/weather"
+          ],
+          "cycles": 1,
+          "expected_price_atomic": null,
+          "budget_atomic": null,
+          "allowed_payto_count": 0,
+          "spend_controls": {
+            "maxAmountPerPayment": "$1"
+          },
+          "note": "settlement is mocked by the harness; captures establish signing, not on-chain transfer"
+        },
+        {
+          "at": "2026-10-24T15:42:12.837Z",
+          "type": "cycle_start",
+          "cycle": 1,
+          "url": "http://127.0.0.1:4430/weather"
+        },
+        {
+          "at": "2026-10-24T15:42:12.878Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4430/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4430/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:42:12.881Z",
+          "type": "signer_call",
+          "call_index": 1,
+          "signer_entry": "signTypedData",
+          "primary_type": "TransferWithAuthorization",
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 84532,
+            "verifyingContract": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+          },
+          "to": "0x9999999999999999999999999999999999999999",
+          "value": "10000",
+          "from": "0xD1ebf1D8fbd4d9F08B68D116582175dCFe5c7Da9",
+          "valid_after": "0",
+          "valid_before": "1792856592",
+          "nonce": "0xee14795e…c662(len66)"
+        },
+        {
+          "at": "2026-10-24T15:42:12.890Z",
+          "type": "cycle_result",
+          "cycle": 1,
+          "http": 200,
+          "receipt_served": {
+            "success": true,
+            "transaction": "0xabababababababababababababababababababababababababababababababab",
+            "network": "eip155:84532"
+          }
+        },
+        {
+          "at": "2026-10-24T15:42:12.890Z",
+          "type": "quote_accepted",
+          "cycle": 1,
+          "bound_to": {
+            "url": "http://127.0.0.1:4430/weather",
+            "method": "GET",
+            "scheme": "exact",
+            "network": "eip155:84532",
+            "amount": "10000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo": "0x9999999999999999999999999999999999999999"
+          },
+          "source": "server 402 accepts[0], accepted by caller at this timestamp",
+          "ledger_size": 1
+        }
+      ],
+      "expected": "1 signer call, 1 payment captured, 200 + settle receipt + resource (baseline behavior)",
+      "observed": "confirmed: 1 signer call, 200 + receipt"
+    },
+    {
+      "session": "s10_o1",
+      "name": "S10-O1 — lost response after the payment was captured; observe mode (current behavior of the official client)",
+      "scenario_id": "S-BS-16",
+      "role": "probe",
+      "client_summary": {
+        "probe": "wave-3 scenario transfers (S10/S11/S-ZS-02 -> x402)",
+        "mode": "observe",
+        "client_version": "v4",
+        "paths": [
+          "/weather"
+        ],
+        "cycles": 2,
+        "signer_call_count": 2,
+        "quote_ledger_size": 1,
+        "budget_atomic": null,
+        "budget_committed_total": null,
+        "allowed_payto_count": 0,
+        "per_cycle": [
+          {
+            "cycle": 1,
+            "error": "fetch failed"
+          },
+          {
+            "cycle": 2,
+            "http": 200,
+            "receipt": {
+              "success": true,
+              "transaction": "0xabababababababababababababababababababababababababababababababab",
+              "network": "eip155:84532"
+            }
+          }
+        ],
+        "started_at": "2026-10-24T15:39:11.390Z",
+        "finished_at": "2026-10-24T15:39:11.480Z",
+        "distinction": "signed authorization captured; on-chain transfer NOT established (mocked settlement)"
+      },
+      "stand_summary": {
+        "scenario_id": "S-BS-16",
+        "slug": "delivery-uncertain-x402",
+        "verdict": "FAIL",
+        "reasons": [
+          "FAIL (attempt 1):",
+          "платежей зафиксировано: 2; запросов: 4; окно наблюдения: 4000ms",
+          "FAIL: после lost response СУТ подписал вторую authorization с новым nonce (0x50ac8e481a6c145862129f59f954cc23c2d3bb8378f4666db29f4813e3a5692d -> 0x44a94de2ac1874041a8ed7db9b5b4fcbfed597d0a8b9cdfb5fb26deb0eccd81d); при реальном settle — двойное списание за одну операцию"
+        ]
+      },
+      "timeline": [
+        {
+          "at": "2026-10-24T15:39:11.416Z",
+          "type": "probe_start",
+          "mode": "observe",
+          "client_version": "v4",
+          "paths": [
+            "/weather"
+          ],
+          "cycles": 2,
+          "expected_price_atomic": null,
+          "budget_atomic": null,
+          "allowed_payto_count": 0,
+          "spend_controls": {
+            "maxAmountPerPayment": "$1"
+          },
+          "note": "settlement is mocked by the harness; captures establish signing, not on-chain transfer"
+        },
+        {
+          "at": "2026-10-24T15:39:11.416Z",
+          "type": "cycle_start",
+          "cycle": 1,
+          "url": "http://127.0.0.1:4431/weather"
+        },
+        {
+          "at": "2026-10-24T15:39:11.459Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4431/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4431/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:39:11.463Z",
+          "type": "signer_call",
+          "call_index": 1,
+          "signer_entry": "signTypedData",
+          "primary_type": "TransferWithAuthorization",
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 84532,
+            "verifyingContract": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+          },
+          "to": "0x9999999999999999999999999999999999999999",
+          "value": "10000",
+          "from": "0x3Cf8198626185f22a4C7B1f7BBdb76239d4a9973",
+          "valid_after": "0",
+          "valid_before": "1792856411",
+          "nonce": "0x50ac8e48…692d(len66)"
+        },
+        {
+          "at": "2026-10-24T15:39:11.473Z",
+          "type": "cycle_error",
+          "cycle": 1,
+          "error": "fetch failed"
+        },
+        {
+          "at": "2026-10-24T15:39:11.473Z",
+          "type": "cycle_start",
+          "cycle": 2,
+          "url": "http://127.0.0.1:4431/weather"
+        },
+        {
+          "at": "2026-10-24T15:39:11.475Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4431/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4431/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:39:11.475Z",
+          "type": "signer_call",
+          "call_index": 2,
+          "signer_entry": "signTypedData",
+          "primary_type": "TransferWithAuthorization",
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 84532,
+            "verifyingContract": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+          },
+          "to": "0x9999999999999999999999999999999999999999",
+          "value": "10000",
+          "from": "0x3Cf8198626185f22a4C7B1f7BBdb76239d4a9973",
+          "valid_after": "0",
+          "valid_before": "1792856411",
+          "nonce": "0x44a94de2…d81d(len66)"
+        },
+        {
+          "at": "2026-10-24T15:39:11.480Z",
+          "type": "cycle_result",
+          "cycle": 2,
+          "http": 200,
+          "receipt_served": {
+            "success": true,
+            "transaction": "0xabababababababababababababababababababababababababababababababab",
+            "network": "eip155:84532"
+          }
+        },
+        {
+          "at": "2026-10-24T15:39:11.480Z",
+          "type": "quote_accepted",
+          "cycle": 2,
+          "bound_to": {
+            "url": "http://127.0.0.1:4431/weather",
+            "method": "GET",
+            "scheme": "exact",
+            "network": "eip155:84532",
+            "amount": "10000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo": "0x9999999999999999999999999999999999999999"
+          },
+          "source": "server 402 accepts[0], accepted by caller at this timestamp",
+          "ledger_size": 1
+        }
+      ],
+      "expected": "FOR REVIEW: does the official client sign a SECOND authorization after the lost response, and with which nonce?",
+      "observed": "DEFECT: client signed a SECOND authorization with a NEW nonce; stand captured 2 payments for one logical operation; with a real settle this is a double charge"
+    },
+    {
+      "session": "s10_o2",
+      "name": "S10-O2 — repeat of S10-O1 (stability)",
+      "scenario_id": "S-BS-16",
+      "role": "probe",
+      "client_summary": {
+        "probe": "wave-3 scenario transfers (S10/S11/S-ZS-02 -> x402)",
+        "mode": "observe",
+        "client_version": "v4",
+        "paths": [
+          "/weather"
+        ],
+        "cycles": 2,
+        "signer_call_count": 2,
+        "quote_ledger_size": 1,
+        "budget_atomic": null,
+        "budget_committed_total": null,
+        "allowed_payto_count": 0,
+        "per_cycle": [
+          {
+            "cycle": 1,
+            "error": "fetch failed"
+          },
+          {
+            "cycle": 2,
+            "http": 200,
+            "receipt": {
+              "success": true,
+              "transaction": "0xabababababababababababababababababababababababababababababababab",
+              "network": "eip155:84532"
+            }
+          }
+        ],
+        "started_at": "2026-10-24T15:39:40.833Z",
+        "finished_at": "2026-10-24T15:39:40.920Z",
+        "distinction": "signed authorization captured; on-chain transfer NOT established (mocked settlement)"
+      },
+      "stand_summary": {
+        "scenario_id": "S-BS-16",
+        "slug": "delivery-uncertain-x402",
+        "verdict": "FAIL",
+        "reasons": [
+          "FAIL (attempt 1):",
+          "платежей зафиксировано: 2; запросов: 4; окно наблюдения: 4000ms",
+          "FAIL: после lost response СУТ подписал вторую authorization с новым nonce (0x625ead8be3cdd863016191feef64a7c6b806a41b6822951763a1d85114425875 -> 0x1fb16d1db2f0176edabc42284799fd4dce289842a5b3e3c766beecb64dfbcb6c); при реальном settle — двойное списание за одну операцию"
+        ]
+      },
+      "timeline": [
+        {
+          "at": "2026-10-24T15:39:40.858Z",
+          "type": "probe_start",
+          "mode": "observe",
+          "client_version": "v4",
+          "paths": [
+            "/weather"
+          ],
+          "cycles": 2,
+          "expected_price_atomic": null,
+          "budget_atomic": null,
+          "allowed_payto_count": 0,
+          "spend_controls": {
+            "maxAmountPerPayment": "$1"
+          },
+          "note": "settlement is mocked by the harness; captures establish signing, not on-chain transfer"
+        },
+        {
+          "at": "2026-10-24T15:39:40.858Z",
+          "type": "cycle_start",
+          "cycle": 1,
+          "url": "http://127.0.0.1:4432/weather"
+        },
+        {
+          "at": "2026-10-24T15:39:40.898Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4432/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4432/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:39:40.902Z",
+          "type": "signer_call",
+          "call_index": 1,
+          "signer_entry": "signTypedData",
+          "primary_type": "TransferWithAuthorization",
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 84532,
+            "verifyingContract": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+          },
+          "to": "0x9999999999999999999999999999999999999999",
+          "value": "10000",
+          "from": "0x0A182834fe02c7589e1cf931A7015b80527f8885",
+          "valid_after": "0",
+          "valid_before": "1792856440",
+          "nonce": "0x625ead8b…5875(len66)"
+        },
+        {
+          "at": "2026-10-24T15:39:40.912Z",
+          "type": "cycle_error",
+          "cycle": 1,
+          "error": "fetch failed"
+        },
+        {
+          "at": "2026-10-24T15:39:40.912Z",
+          "type": "cycle_start",
+          "cycle": 2,
+          "url": "http://127.0.0.1:4432/weather"
+        },
+        {
+          "at": "2026-10-24T15:39:40.914Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4432/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4432/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:39:40.915Z",
+          "type": "signer_call",
+          "call_index": 2,
+          "signer_entry": "signTypedData",
+          "primary_type": "TransferWithAuthorization",
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 84532,
+            "verifyingContract": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+          },
+          "to": "0x9999999999999999999999999999999999999999",
+          "value": "10000",
+          "from": "0x0A182834fe02c7589e1cf931A7015b80527f8885",
+          "valid_after": "0",
+          "valid_before": "1792856440",
+          "nonce": "0x1fb16d1d…cb6c(len66)"
+        },
+        {
+          "at": "2026-10-24T15:39:40.920Z",
+          "type": "cycle_result",
+          "cycle": 2,
+          "http": 200,
+          "receipt_served": {
+            "success": true,
+            "transaction": "0xabababababababababababababababababababababababababababababababab",
+            "network": "eip155:84532"
+          }
+        },
+        {
+          "at": "2026-10-24T15:39:40.920Z",
+          "type": "quote_accepted",
+          "cycle": 2,
+          "bound_to": {
+            "url": "http://127.0.0.1:4432/weather",
+            "method": "GET",
+            "scheme": "exact",
+            "network": "eip155:84532",
+            "amount": "10000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo": "0x9999999999999999999999999999999999999999"
+          },
+          "source": "server 402 accepts[0], accepted by caller at this timestamp",
+          "ledger_size": 1
+        }
+      ],
+      "expected": "same as s10_o1",
+      "observed": "reproduced: 2 signer calls, 2 payments, new nonce again"
+    },
+    {
+      "session": "s10_o3",
+      "name": "S10-O3 — lost response with NO retry cycle: client left in delivery-uncertain state (payment captured, outcome unknown, resource not received)",
+      "scenario_id": "S-BS-16",
+      "role": "probe",
+      "client_summary": {
+        "probe": "wave-3 scenario transfers (S10/S11/S-ZS-02 -> x402)",
+        "mode": "observe",
+        "client_version": "v4",
+        "paths": [
+          "/weather"
+        ],
+        "cycles": 1,
+        "signer_call_count": 1,
+        "quote_ledger_size": 0,
+        "budget_atomic": null,
+        "budget_committed_total": null,
+        "allowed_payto_count": 0,
+        "per_cycle": [
+          {
+            "cycle": 1,
+            "error": "fetch failed"
+          }
+        ],
+        "started_at": "2026-10-24T15:39:47.025Z",
+        "finished_at": "2026-10-24T15:39:47.115Z",
+        "distinction": "signed authorization captured; on-chain transfer NOT established (mocked settlement)"
+      },
+      "stand_summary": {
+        "scenario_id": "S-BS-16",
+        "slug": "delivery-uncertain-x402",
+        "verdict": "ADVISORY",
+        "reasons": [
+          "ADVISORY (attempt 1):",
+          "платежей зафиксировано: 1; запросов: 2; окно наблюдения: 4000ms",
+          "ADV: СУТ не ретраит после сетевой ошибки — операция остаётся в неопределённости (платёж зафиксирован, ресурс не получен)"
+        ]
+      },
+      "timeline": [
+        {
+          "at": "2026-10-24T15:39:47.055Z",
+          "type": "probe_start",
+          "mode": "observe",
+          "client_version": "v4",
+          "paths": [
+            "/weather"
+          ],
+          "cycles": 1,
+          "expected_price_atomic": null,
+          "budget_atomic": null,
+          "allowed_payto_count": 0,
+          "spend_controls": {
+            "maxAmountPerPayment": "$1"
+          },
+          "note": "settlement is mocked by the harness; captures establish signing, not on-chain transfer"
+        },
+        {
+          "at": "2026-10-24T15:39:47.056Z",
+          "type": "cycle_start",
+          "cycle": 1,
+          "url": "http://127.0.0.1:4433/weather"
+        },
+        {
+          "at": "2026-10-24T15:39:47.101Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4433/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4433/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:39:47.105Z",
+          "type": "signer_call",
+          "call_index": 1,
+          "signer_entry": "signTypedData",
+          "primary_type": "TransferWithAuthorization",
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 84532,
+            "verifyingContract": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+          },
+          "to": "0x9999999999999999999999999999999999999999",
+          "value": "10000",
+          "from": "0xfCEF8fB573965D91972AAfDB5aEd8730F3937d7E",
+          "valid_after": "0",
+          "valid_before": "1792856447",
+          "nonce": "0x806f4db9…8654(len66)"
+        },
+        {
+          "at": "2026-10-24T15:39:47.115Z",
+          "type": "cycle_error",
+          "cycle": 1,
+          "error": "fetch failed"
+        }
+      ],
+      "expected": "FOR REVIEW: how does the client surface the uncertain outcome without a retry cycle?",
+      "observed": "client surfaced a network error; payment captured; resource not received; no uncertainty marker exists in the protocol"
+    },
+    {
+      "session": "s11_b1",
+      "name": "S11-B1 — budget 20000, two calls of 10000: boundary at exactly the limit is INCLUSIVE (committed 20000 == budget)",
+      "scenario_id": "S-BS-17",
+      "role": "probe",
+      "client_summary": {
+        "probe": "wave-3 scenario transfers (S10/S11/S-ZS-02 -> x402)",
+        "mode": "observe",
+        "client_version": "v4",
+        "paths": [
+          "/weather"
+        ],
+        "cycles": 2,
+        "signer_call_count": 2,
+        "quote_ledger_size": 1,
+        "budget_atomic": "20000",
+        "budget_committed_total": "20000",
+        "allowed_payto_count": 0,
+        "per_cycle": [
+          {
+            "cycle": 1,
+            "http": 200,
+            "receipt": {
+              "success": true,
+              "transaction": "0xabababababababababababababababababababababababababababababababab",
+              "network": "eip155:84532"
+            }
+          },
+          {
+            "cycle": 2,
+            "http": 200,
+            "receipt": {
+              "success": true,
+              "transaction": "0xabababababababababababababababababababababababababababababababab",
+              "network": "eip155:84532"
+            }
+          }
+        ],
+        "started_at": "2026-10-24T15:39:56.498Z",
+        "finished_at": "2026-10-24T15:39:56.584Z",
+        "distinction": "signed authorization captured; on-chain transfer NOT established (mocked settlement)"
+      },
+      "stand_summary": {
+        "scenario_id": "S-BS-17",
+        "slug": "over-budget-x402",
+        "verdict": "PASS",
+        "reasons": [
+          "PASS (attempt 1):",
+          "платежей зафиксировано: 2; запросов: 4; окно наблюдения: 4000ms",
+          "платежей 2 <= потолка caller-бюджета 2; сверх-лимитные подписи контроллер отклоняет до подписанта (детали — клиентские события)"
+        ]
+      },
+      "timeline": [
+        {
+          "at": "2026-10-24T15:39:56.525Z",
+          "type": "probe_start",
+          "mode": "observe",
+          "client_version": "v4",
+          "paths": [
+            "/weather"
+          ],
+          "cycles": 2,
+          "expected_price_atomic": null,
+          "budget_atomic": "20000",
+          "allowed_payto_count": 0,
+          "spend_controls": {
+            "maxAmountPerPayment": "$1"
+          },
+          "note": "settlement is mocked by the harness; captures establish signing, not on-chain transfer"
+        },
+        {
+          "at": "2026-10-24T15:39:56.525Z",
+          "type": "cycle_start",
+          "cycle": 1,
+          "url": "http://127.0.0.1:4434/weather"
+        },
+        {
+          "at": "2026-10-24T15:39:56.564Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4434/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4434/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:39:56.567Z",
+          "type": "signer_call",
+          "call_index": 1,
+          "signer_entry": "signTypedData",
+          "primary_type": "TransferWithAuthorization",
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 84532,
+            "verifyingContract": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+          },
+          "to": "0x9999999999999999999999999999999999999999",
+          "value": "10000",
+          "from": "0xb075695020d0b608cC9554f664A54035644c2716",
+          "valid_after": "0",
+          "valid_before": "1792856456",
+          "nonce": "0xb06bc03f…5c5f(len66)"
+        },
+        {
+          "at": "2026-10-24T15:39:56.572Z",
+          "type": "budget_committed",
+          "committed": "10000"
+        },
+        {
+          "at": "2026-10-24T15:39:56.577Z",
+          "type": "cycle_result",
+          "cycle": 1,
+          "http": 200,
+          "receipt_served": {
+            "success": true,
+            "transaction": "0xabababababababababababababababababababababababababababababababab",
+            "network": "eip155:84532"
+          }
+        },
+        {
+          "at": "2026-10-24T15:39:56.577Z",
+          "type": "quote_accepted",
+          "cycle": 1,
+          "bound_to": {
+            "url": "http://127.0.0.1:4434/weather",
+            "method": "GET",
+            "scheme": "exact",
+            "network": "eip155:84532",
+            "amount": "10000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo": "0x9999999999999999999999999999999999999999"
+          },
+          "source": "server 402 accepts[0], accepted by caller at this timestamp",
+          "ledger_size": 1
+        },
+        {
+          "at": "2026-10-24T15:39:56.577Z",
+          "type": "cycle_start",
+          "cycle": 2,
+          "url": "http://127.0.0.1:4434/weather"
+        },
+        {
+          "at": "2026-10-24T15:39:56.580Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4434/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4434/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:39:56.581Z",
+          "type": "signer_call",
+          "call_index": 2,
+          "signer_entry": "signTypedData",
+          "primary_type": "TransferWithAuthorization",
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 84532,
+            "verifyingContract": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+          },
+          "to": "0x9999999999999999999999999999999999999999",
+          "value": "10000",
+          "from": "0xb075695020d0b608cC9554f664A54035644c2716",
+          "valid_after": "0",
+          "valid_before": "1792856456",
+          "nonce": "0x0ce5a6bd…5bfc(len66)"
+        },
+        {
+          "at": "2026-10-24T15:39:56.582Z",
+          "type": "budget_committed",
+          "committed": "20000"
+        },
+        {
+          "at": "2026-10-24T15:39:56.584Z",
+          "type": "cycle_result",
+          "cycle": 2,
+          "http": 200,
+          "receipt_served": {
+            "success": true,
+            "transaction": "0xabababababababababababababababababababababababababababababababab",
+            "network": "eip155:84532"
+          }
+        }
+      ],
+      "expected": "2 signer calls, committed 20000 == budget (boundary inclusive), 2 payments captured",
+      "observed": "confirmed: boundary inclusive; committed 20000 == budget 20000; both calls paid"
+    },
+    {
+      "session": "s11_b2",
+      "name": "S11-B2 — budget 15000: second call (10000) refused BEFORE the signer (budget_exceeded_before_signer); only the first call pays",
+      "scenario_id": "S-BS-17",
+      "role": "probe",
+      "client_summary": {
+        "probe": "wave-3 scenario transfers (S10/S11/S-ZS-02 -> x402)",
+        "mode": "observe",
+        "client_version": "v4",
+        "paths": [
+          "/weather"
+        ],
+        "cycles": 2,
+        "signer_call_count": 1,
+        "quote_ledger_size": 1,
+        "budget_atomic": "15000",
+        "budget_committed_total": "10000",
+        "allowed_payto_count": 0,
+        "per_cycle": [
+          {
+            "cycle": 1,
+            "http": 200,
+            "receipt": {
+              "success": true,
+              "transaction": "0xabababababababababababababababababababababababababababababababab",
+              "network": "eip155:84532"
+            }
+          },
+          {
+            "cycle": 2,
+            "error": "Failed to create payment payload: budget-rejected: budget_exceeded_before_signer (committed 10000 + 10000 > budget 15000)"
+          }
+        ],
+        "started_at": "2026-10-24T15:40:02.473Z",
+        "finished_at": "2026-10-24T15:40:02.566Z",
+        "distinction": "signed authorization captured; on-chain transfer NOT established (mocked settlement)"
+      },
+      "stand_summary": {
+        "scenario_id": "S-BS-17",
+        "slug": "over-budget-x402",
+        "verdict": "PASS",
+        "reasons": [
+          "PASS (attempt 1):",
+          "платежей зафиксировано: 1; запросов: 3; окно наблюдения: 4000ms",
+          "платежей 1 <= потолка caller-бюджета 1; сверх-лимитные подписи контроллер отклоняет до подписанта (детали — клиентские события)"
+        ]
+      },
+      "timeline": [
+        {
+          "at": "2026-10-24T15:40:02.501Z",
+          "type": "probe_start",
+          "mode": "observe",
+          "client_version": "v4",
+          "paths": [
+            "/weather"
+          ],
+          "cycles": 2,
+          "expected_price_atomic": null,
+          "budget_atomic": "15000",
+          "allowed_payto_count": 0,
+          "spend_controls": {
+            "maxAmountPerPayment": "$1"
+          },
+          "note": "settlement is mocked by the harness; captures establish signing, not on-chain transfer"
+        },
+        {
+          "at": "2026-10-24T15:40:02.502Z",
+          "type": "cycle_start",
+          "cycle": 1,
+          "url": "http://127.0.0.1:4435/weather"
+        },
+        {
+          "at": "2026-10-24T15:40:02.542Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4435/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4435/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:40:02.546Z",
+          "type": "signer_call",
+          "call_index": 1,
+          "signer_entry": "signTypedData",
+          "primary_type": "TransferWithAuthorization",
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 84532,
+            "verifyingContract": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+          },
+          "to": "0x9999999999999999999999999999999999999999",
+          "value": "10000",
+          "from": "0xA33EfDC7b92540b58e5fC1a575F4991FF45f54fB",
+          "valid_after": "0",
+          "valid_before": "1792856462",
+          "nonce": "0x0ab9ce1c…bd03(len66)"
+        },
+        {
+          "at": "2026-10-24T15:40:02.551Z",
+          "type": "budget_committed",
+          "committed": "10000"
+        },
+        {
+          "at": "2026-10-24T15:40:02.557Z",
+          "type": "cycle_result",
+          "cycle": 1,
+          "http": 200,
+          "receipt_served": {
+            "success": true,
+            "transaction": "0xabababababababababababababababababababababababababababababababab",
+            "network": "eip155:84532"
+          }
+        },
+        {
+          "at": "2026-10-24T15:40:02.557Z",
+          "type": "quote_accepted",
+          "cycle": 1,
+          "bound_to": {
+            "url": "http://127.0.0.1:4435/weather",
+            "method": "GET",
+            "scheme": "exact",
+            "network": "eip155:84532",
+            "amount": "10000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo": "0x9999999999999999999999999999999999999999"
+          },
+          "source": "server 402 accepts[0], accepted by caller at this timestamp",
+          "ledger_size": 1
+        },
+        {
+          "at": "2026-10-24T15:40:02.557Z",
+          "type": "cycle_start",
+          "cycle": 2,
+          "url": "http://127.0.0.1:4435/weather"
+        },
+        {
+          "at": "2026-10-24T15:40:02.565Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4435/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4435/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:40:02.566Z",
+          "type": "budget_rejected_before_signer",
+          "call_index": 2,
+          "signer_entry": "signTypedData",
+          "committed": "10000",
+          "amount": "10000",
+          "budget": "15000",
+          "would_have_signed": {
+            "to": "0x9999999999999999999999999999999999999999",
+            "value": "10000"
+          }
+        },
+        {
+          "at": "2026-10-24T15:40:02.566Z",
+          "type": "cycle_error",
+          "cycle": 2,
+          "error": "Failed to create payment payload: budget-rejected: budget_exceeded_before_signer (committed 10000 + 10000 > budget 15000)"
+        }
+      ],
+      "expected": "1 signer call; cycle 2 refused BEFORE the signer; 1 payment captured",
+      "observed": "confirmed: budget_exceeded_before_signer (committed 10000 + amount 10000 > budget 15000); 0 unauthorized payments"
+    },
+    {
+      "session": "s11_b3",
+      "name": "S11-B3 — control: NO budget, same sequence pays twice (baseline for B2; expected-max-payments 2 is the run ceiling, not a client policy)",
+      "scenario_id": "S-BS-17",
+      "role": "control",
+      "client_summary": {
+        "probe": "wave-3 scenario transfers (S10/S11/S-ZS-02 -> x402)",
+        "mode": "observe",
+        "client_version": "v4",
+        "paths": [
+          "/weather"
+        ],
+        "cycles": 2,
+        "signer_call_count": 2,
+        "quote_ledger_size": 1,
+        "budget_atomic": null,
+        "budget_committed_total": null,
+        "allowed_payto_count": 0,
+        "per_cycle": [
+          {
+            "cycle": 1,
+            "http": 200,
+            "receipt": {
+              "success": true,
+              "transaction": "0xabababababababababababababababababababababababababababababababab",
+              "network": "eip155:84532"
+            }
+          },
+          {
+            "cycle": 2,
+            "http": 200,
+            "receipt": {
+              "success": true,
+              "transaction": "0xabababababababababababababababababababababababababababababababab",
+              "network": "eip155:84532"
+            }
+          }
+        ],
+        "started_at": "2026-10-24T15:40:08.438Z",
+        "finished_at": "2026-10-24T15:40:08.527Z",
+        "distinction": "signed authorization captured; on-chain transfer NOT established (mocked settlement)"
+      },
+      "stand_summary": {
+        "scenario_id": "S-BS-17",
+        "slug": "over-budget-x402",
+        "verdict": "PASS",
+        "reasons": [
+          "PASS (attempt 1):",
+          "платежей зафиксировано: 2; запросов: 4; окно наблюдения: 4000ms",
+          "платежей 2 <= потолка caller-бюджета 2; сверх-лимитные подписи контроллер отклоняет до подписанта (детали — клиентские события)"
+        ]
+      },
+      "timeline": [
+        {
+          "at": "2026-10-24T15:40:08.464Z",
+          "type": "probe_start",
+          "mode": "observe",
+          "client_version": "v4",
+          "paths": [
+            "/weather"
+          ],
+          "cycles": 2,
+          "expected_price_atomic": null,
+          "budget_atomic": null,
+          "allowed_payto_count": 0,
+          "spend_controls": {
+            "maxAmountPerPayment": "$1"
+          },
+          "note": "settlement is mocked by the harness; captures establish signing, not on-chain transfer"
+        },
+        {
+          "at": "2026-10-24T15:40:08.465Z",
+          "type": "cycle_start",
+          "cycle": 1,
+          "url": "http://127.0.0.1:4436/weather"
+        },
+        {
+          "at": "2026-10-24T15:40:08.508Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4436/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4436/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:40:08.511Z",
+          "type": "signer_call",
+          "call_index": 1,
+          "signer_entry": "signTypedData",
+          "primary_type": "TransferWithAuthorization",
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 84532,
+            "verifyingContract": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+          },
+          "to": "0x9999999999999999999999999999999999999999",
+          "value": "10000",
+          "from": "0x3F41e4b11c70f23E02a405651036AF50871C6355",
+          "valid_after": "0",
+          "valid_before": "1792856468",
+          "nonce": "0xffec95e0…7120(len66)"
+        },
+        {
+          "at": "2026-10-24T15:40:08.520Z",
+          "type": "cycle_result",
+          "cycle": 1,
+          "http": 200,
+          "receipt_served": {
+            "success": true,
+            "transaction": "0xabababababababababababababababababababababababababababababababab",
+            "network": "eip155:84532"
+          }
+        },
+        {
+          "at": "2026-10-24T15:40:08.520Z",
+          "type": "quote_accepted",
+          "cycle": 1,
+          "bound_to": {
+            "url": "http://127.0.0.1:4436/weather",
+            "method": "GET",
+            "scheme": "exact",
+            "network": "eip155:84532",
+            "amount": "10000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo": "0x9999999999999999999999999999999999999999"
+          },
+          "source": "server 402 accepts[0], accepted by caller at this timestamp",
+          "ledger_size": 1
+        },
+        {
+          "at": "2026-10-24T15:40:08.520Z",
+          "type": "cycle_start",
+          "cycle": 2,
+          "url": "http://127.0.0.1:4436/weather"
+        },
+        {
+          "at": "2026-10-24T15:40:08.523Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4436/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4436/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:40:08.524Z",
+          "type": "signer_call",
+          "call_index": 2,
+          "signer_entry": "signTypedData",
+          "primary_type": "TransferWithAuthorization",
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 84532,
+            "verifyingContract": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+          },
+          "to": "0x9999999999999999999999999999999999999999",
+          "value": "10000",
+          "from": "0x3F41e4b11c70f23E02a405651036AF50871C6355",
+          "valid_after": "0",
+          "valid_before": "1792856468",
+          "nonce": "0x5f891062…95d6(len66)"
+        },
+        {
+          "at": "2026-10-24T15:40:08.527Z",
+          "type": "cycle_result",
+          "cycle": 2,
+          "http": 200,
+          "receipt_served": {
+            "success": true,
+            "transaction": "0xabababababababababababababababababababababababababababababababab",
+            "network": "eip155:84532"
+          }
+        }
+      ],
+      "expected": "2 signer calls, 2 payments (no client budget)",
+      "observed": "confirmed baseline: without the budget the same sequence pays twice"
+    },
+    {
+      "session": "s18_a1",
+      "name": "S18-A1 — malicious accepts[0] (payTo = attacker 0x6666…6666), canonical accepts[1]; observe mode: which requirement does the official client pick?",
+      "scenario_id": "S-BS-18",
+      "role": "probe",
+      "client_summary": {
+        "probe": "wave-3 scenario transfers (S10/S11/S-ZS-02 -> x402)",
+        "mode": "observe",
+        "client_version": "v4",
+        "paths": [
+          "/weather"
+        ],
+        "cycles": 1,
+        "signer_call_count": 1,
+        "quote_ledger_size": 1,
+        "budget_atomic": null,
+        "budget_committed_total": null,
+        "allowed_payto_count": 0,
+        "per_cycle": [
+          {
+            "cycle": 1,
+            "http": 200,
+            "receipt": {
+              "success": true,
+              "transaction": "0xabababababababababababababababababababababababababababababababab",
+              "network": "eip155:84532"
+            }
+          }
+        ],
+        "started_at": "2026-10-24T15:40:21.536Z",
+        "finished_at": "2026-10-24T15:40:21.612Z",
+        "distinction": "signed authorization captured; on-chain transfer NOT established (mocked settlement)"
+      },
+      "stand_summary": {
+        "scenario_id": "S-BS-18",
+        "slug": "first-accept-wins",
+        "verdict": "FAIL",
+        "reasons": [
+          "FAIL (attempt 1):",
+          "платежей зафиксировано: 1; запросов: 2; окно наблюдения: 4000ms",
+          "FAIL: СУТ подписал malicious accepts[0] (payTo=0x6666666666666666666666666666666666666666); продавец диктует получателя/сумму"
+        ]
+      },
+      "timeline": [
+        {
+          "at": "2026-10-24T15:40:21.561Z",
+          "type": "probe_start",
+          "mode": "observe",
+          "client_version": "v4",
+          "paths": [
+            "/weather"
+          ],
+          "cycles": 1,
+          "expected_price_atomic": null,
+          "budget_atomic": null,
+          "allowed_payto_count": 0,
+          "spend_controls": {
+            "maxAmountPerPayment": "$1"
+          },
+          "note": "settlement is mocked by the harness; captures establish signing, not on-chain transfer"
+        },
+        {
+          "at": "2026-10-24T15:40:21.561Z",
+          "type": "cycle_start",
+          "cycle": 1,
+          "url": "http://127.0.0.1:4437/weather"
+        },
+        {
+          "at": "2026-10-24T15:40:21.601Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4437/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4437/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x6666666666666666666666666666666666666666",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              },
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:40:21.604Z",
+          "type": "signer_call",
+          "call_index": 1,
+          "signer_entry": "signTypedData",
+          "primary_type": "TransferWithAuthorization",
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 84532,
+            "verifyingContract": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+          },
+          "to": "0x6666666666666666666666666666666666666666",
+          "value": "10000",
+          "from": "0x116Ba2727838d180b262808c888219f43a2e343D",
+          "valid_after": "0",
+          "valid_before": "1792856481",
+          "nonce": "0x4bb529de…2de2(len66)"
+        },
+        {
+          "at": "2026-10-24T15:40:21.612Z",
+          "type": "cycle_result",
+          "cycle": 1,
+          "http": 200,
+          "receipt_served": {
+            "success": true,
+            "transaction": "0xabababababababababababababababababababababababababababababababab",
+            "network": "eip155:84532"
+          }
+        },
+        {
+          "at": "2026-10-24T15:40:21.612Z",
+          "type": "quote_accepted",
+          "cycle": 1,
+          "bound_to": {
+            "url": "http://127.0.0.1:4437/weather",
+            "method": "GET",
+            "scheme": "exact",
+            "network": "eip155:84532",
+            "amount": "10000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo": "0x6666666666666666666666666666666666666666"
+          },
+          "source": "server 402 accepts[0], accepted by caller at this timestamp",
+          "ledger_size": 1
+        }
+      ],
+      "expected": "FOR REVIEW: which accepts entry does the client sign — [0] (attacker payTo) or [1] (canonical)?",
+      "observed": "DEFECT: client picked accepts[0] and SIGNED to the attacker payTo (0x6666…6666) — first-accept-wins; seller dictates the recipient"
+    },
+    {
+      "session": "s18_a2",
+      "name": "S18-A2 — malicious accepts[0] (amount = 100000 = x10), canonical accepts[1]; observe mode",
+      "scenario_id": "S-BS-18",
+      "role": "probe",
+      "client_summary": {
+        "probe": "wave-3 scenario transfers (S10/S11/S-ZS-02 -> x402)",
+        "mode": "observe",
+        "client_version": "v4",
+        "paths": [
+          "/weather"
+        ],
+        "cycles": 1,
+        "signer_call_count": 1,
+        "quote_ledger_size": 1,
+        "budget_atomic": null,
+        "budget_committed_total": null,
+        "allowed_payto_count": 0,
+        "per_cycle": [
+          {
+            "cycle": 1,
+            "http": 200,
+            "receipt": {
+              "success": true,
+              "transaction": "0xabababababababababababababababababababababababababababababababab",
+              "network": "eip155:84532"
+            }
+          }
+        ],
+        "started_at": "2026-10-24T15:40:27.478Z",
+        "finished_at": "2026-10-24T15:40:27.556Z",
+        "distinction": "signed authorization captured; on-chain transfer NOT established (mocked settlement)"
+      },
+      "stand_summary": {
+        "scenario_id": "S-BS-18",
+        "slug": "first-accept-wins",
+        "verdict": "FAIL",
+        "reasons": [
+          "FAIL (attempt 1):",
+          "платежей зафиксировано: 1; запросов: 2; окно наблюдения: 4000ms",
+          "FAIL: СУТ подписал malicious accepts[0] (amount=100000); продавец диктует получателя/сумму"
+        ]
+      },
+      "timeline": [
+        {
+          "at": "2026-10-24T15:40:27.506Z",
+          "type": "probe_start",
+          "mode": "observe",
+          "client_version": "v4",
+          "paths": [
+            "/weather"
+          ],
+          "cycles": 1,
+          "expected_price_atomic": null,
+          "budget_atomic": null,
+          "allowed_payto_count": 0,
+          "spend_controls": {
+            "maxAmountPerPayment": "$1"
+          },
+          "note": "settlement is mocked by the harness; captures establish signing, not on-chain transfer"
+        },
+        {
+          "at": "2026-10-24T15:40:27.506Z",
+          "type": "cycle_start",
+          "cycle": 1,
+          "url": "http://127.0.0.1:4438/weather"
+        },
+        {
+          "at": "2026-10-24T15:40:27.543Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4438/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4438/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "100000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              },
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:40:27.547Z",
+          "type": "signer_call",
+          "call_index": 1,
+          "signer_entry": "signTypedData",
+          "primary_type": "TransferWithAuthorization",
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 84532,
+            "verifyingContract": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+          },
+          "to": "0x9999999999999999999999999999999999999999",
+          "value": "100000",
+          "from": "0x4005E6C0226Fb5A950fD91550dc5A94e8B95F8D3",
+          "valid_after": "0",
+          "valid_before": "1792856487",
+          "nonce": "0xf0fe9cab…7b96(len66)"
+        },
+        {
+          "at": "2026-10-24T15:40:27.556Z",
+          "type": "cycle_result",
+          "cycle": 1,
+          "http": 200,
+          "receipt_served": {
+            "success": true,
+            "transaction": "0xabababababababababababababababababababababababababababababababab",
+            "network": "eip155:84532"
+          }
+        },
+        {
+          "at": "2026-10-24T15:40:27.556Z",
+          "type": "quote_accepted",
+          "cycle": 1,
+          "bound_to": {
+            "url": "http://127.0.0.1:4438/weather",
+            "method": "GET",
+            "scheme": "exact",
+            "network": "eip155:84532",
+            "amount": "100000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo": "0x9999999999999999999999999999999999999999"
+          },
+          "source": "server 402 accepts[0], accepted by caller at this timestamp",
+          "ledger_size": 1
+        }
+      ],
+      "expected": "FOR REVIEW: which accepts entry does the client sign — [0] (amount 100000) or [1] (10000)?",
+      "observed": "DEFECT: client picked accepts[0] and SIGNED value 100000 (x10) — seller dictates the amount; spend-control maxAmountPerPayment=$1 (1000000 atomic) did not stop 100000"
+    },
+    {
+      "session": "s18_a3",
+      "name": "S18-A3 — same malicious accepts[0] as A1, caller-side recipient whitelist SUT_CLIENT_ALLOWED_PAYTO (S-ZS-02 allowedSellers transfer): refusal BEFORE the signer",
+      "scenario_id": "S-BS-18",
+      "role": "control",
+      "client_summary": {
+        "probe": "wave-3 scenario transfers (S10/S11/S-ZS-02 -> x402)",
+        "mode": "observe",
+        "client_version": "v4",
+        "paths": [
+          "/weather"
+        ],
+        "cycles": 1,
+        "signer_call_count": 0,
+        "quote_ledger_size": 0,
+        "budget_atomic": null,
+        "budget_committed_total": null,
+        "allowed_payto_count": 1,
+        "per_cycle": [
+          {
+            "cycle": 1,
+            "error": "Failed to create payment payload: allowed-sellers-rejected: payTo 0x6666666666666666666666666666666666666666 not in caller whitelist"
+          }
+        ],
+        "started_at": "2026-10-24T15:40:33.415Z",
+        "finished_at": "2026-10-24T15:40:33.484Z",
+        "distinction": "signed authorization captured; on-chain transfer NOT established (mocked settlement)"
+      },
+      "stand_summary": {
+        "scenario_id": "S-BS-18",
+        "slug": "first-accept-wins",
+        "verdict": "ADVISORY",
+        "reasons": [
+          "ADVISORY (attempt 1):",
+          "платежей зафиксировано: 0; запросов: 1; окно наблюдения: 4000ms",
+          "СУТ не платил по multi-accepts 402; control-отказ до подписанта фиксируется клиентскими событиями (allowedSellers-политика)"
+        ]
+      },
+      "timeline": [
+        {
+          "at": "2026-10-24T15:40:33.443Z",
+          "type": "probe_start",
+          "mode": "observe",
+          "client_version": "v4",
+          "paths": [
+            "/weather"
+          ],
+          "cycles": 1,
+          "expected_price_atomic": null,
+          "budget_atomic": null,
+          "allowed_payto_count": 1,
+          "spend_controls": {
+            "maxAmountPerPayment": "$1"
+          },
+          "note": "settlement is mocked by the harness; captures establish signing, not on-chain transfer"
+        },
+        {
+          "at": "2026-10-24T15:40:33.443Z",
+          "type": "cycle_start",
+          "cycle": 1,
+          "url": "http://127.0.0.1:4439/weather"
+        },
+        {
+          "at": "2026-10-24T15:40:33.480Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4439/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4439/weather",
+              "description": "canonical block-b resource"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x6666666666666666666666666666666666666666",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              },
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-24T15:40:33.484Z",
+          "type": "allowed_sellers_rejected_before_signer",
+          "call_index": 1,
+          "signer_entry": "signTypedData",
+          "pay_to": "0x6666666666666666666666666666666666666666",
+          "whitelist": [
+            "0x9999999999999999999999999999999999999999"
+          ],
+          "would_have_signed": {
+            "to": "0x6666666666666666666666666666666666666666",
+            "value": "10000"
+          }
+        },
+        {
+          "at": "2026-10-24T15:40:33.484Z",
+          "type": "cycle_error",
+          "cycle": 1,
+          "error": "Failed to create payment payload: allowed-sellers-rejected: payTo 0x6666666666666666666666666666666666666666 not in caller whitelist"
+        }
+      ],
+      "expected": "0 signer calls; refusal before the signer (allowed_sellers_rejected_before_signer)",
+      "observed": "confirmed control: allowed_sellers_rejected_before_signer, signer_call_count 0; caller-side whitelist neutralizes first-accept-wins"
+    }
+  ]
+}
