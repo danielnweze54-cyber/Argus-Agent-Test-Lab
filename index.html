@@ -64,14 +64,20 @@
 
   <div class="section-head"><div><span class="label">RECENT TESTS</span><h2>Execution history</h2></div><button class="text-btn" data-page="tests">View all →</button></div>
   <div class="panel table-wrap"><table><thead><tr><th>TEST ID</th><th>SCENARIO</th><th>TARGET</th><th>STATUS</th><th>VERDICT</th><th>STARTED</th></tr></thead><tbody>
-    <tr data-detail="T-024"><td class="mono">T-024</td><td>Lost Delivery</td><td>Secretariat</td><td><span class="badge staged">STAGED</span></td><td><span class="verdict-text amber">UNRESOLVED</span></td><td>2m ago</td></tr>
+    <tr data-detail="T-024" tabindex="0" role="button" aria-label="Open Lost Delivery result">
+  <td class="mono">T-024</td>
+  <td>Lost Delivery</td>
+  <td>Secretariat</td>
+  <td><span class="badge complete">COMPLETE</span></td>
+  <td><span class="verdict-text amber">UNRESOLVED</span></td>
+  <td>Illustrative</td></tr>
     <tr data-detail="T-023"><td class="mono">T-023</td><td>Crash After Settlement</td><td>Secretariat</td><td><span class="badge complete">COMPLETE</span></td><td><span class="verdict-text green">PROVEN_SUCCESS</span></td><td>18m ago</td></tr>
     <tr data-detail="T-022"><td class="mono">T-022</td><td>Duplicate Request</td><td>Secretariat</td><td><span class="badge complete">COMPLETE</span></td><td><span class="verdict-text red">PROVEN_FAILURE</span></td><td>31m ago</td></tr>
   </tbody></table></div>
 </section>
 
 <section id="tests" class="page"><div class="page-head compact"><div><div class="eyebrow">TESTS</div><h1>Execution history</h1><p>Every run is a durable test record with observable evidence.</p></div><button id="runTest2" class="primary">Run a test →</button></div><div class="panel table-wrap"><table><thead><tr><th>TEST ID</th><th>AGENT</th><th>SCENARIO</th><th>TARGET</th><th>STATUS</th><th>VERDICT</th></tr></thead><tbody>
-<tr><td class="mono">T-024</td><td>argus-buyer-01</td><td>Lost Delivery</td><td>Secretariat</td><td>STAGED</td><td class="amber">UNRESOLVED</td></tr><tr><td class="mono">T-023</td><td>argus-buyer-01</td><td>Crash After Settlement</td><td>Secretariat</td><td>COMPLETE</td><td class="green">PROVEN_SUCCESS</td></tr><tr><td class="mono">T-022</td><td>argus-buyer-01</td><td>Duplicate Request</td><td>Secretariat</td><td>COMPLETE</td><td class="red">PROVEN_FAILURE</td></tr><tr><td class="mono">T-021</td><td>argus-buyer-01</td><td>Payment Retry</td><td>Secretariat</td><td>COMPLETE</td><td class="green">PROVEN_SUCCESS</td></tr>
+<tr><td class="mono">T-024</td><td>argus-buyer-01</td><td>Lost Delivery</td><td>Secretariat</td><td>COMPLETE</td><td class="amber">UNRESOLVED</td></tr><tr><td class="mono">T-023</td><td>argus-buyer-01</td><td>Crash After Settlement</td><td>Secretariat</td><td>COMPLETE</td><td class="green">PROVEN_SUCCESS</td></tr><tr><td class="mono">T-022</td><td>argus-buyer-01</td><td>Duplicate Request</td><td>Secretariat</td><td>COMPLETE</td><td class="red">PROVEN_FAILURE</td></tr><tr><td class="mono">T-021</td><td>argus-buyer-01</td><td>Payment Retry</td><td>Secretariat</td><td>COMPLETE</td><td class="green">PROVEN_SUCCESS</td></tr>
 </tbody></table></div></section>
 
 <section id="scenarios" class="page"><div class="page-head compact"><div><div class="eyebrow">SCENARIOS</div><h1>Controlled failure modes</h1><p>Small, composable scenarios for testing behavior under pressure.</p></div></div><div class="scenario-grid"><div class="scenario-card"><div class="scenario-num">S01</div><h2>Honest</h2><p>Baseline participant behavior</p><button class="secondary" data-scenario="Honest">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S02</div><h2>Impatient</h2><p>Early retry pressure</p><button class="secondary" data-scenario="Impatient">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S03</div><h2>Duplicate</h2><p>Repeated request</p><button class="secondary" data-scenario="Duplicate">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S04</div><h2>Adversarial</h2><p>Hostile participant behavior</p><button class="secondary" data-scenario="Adversarial">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S05</div><h2>Slow</h2><p>Delayed seller</p><button class="secondary" data-scenario="Slow">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S06</div><h2>Broken</h2><p>Broken target</p><button class="secondary" data-scenario="Broken">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S07</div><h2>Delivery Loss</h2><p>Response delivery disappears</p><button class="secondary" data-scenario="Delivery Loss">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S08</div><h2>Crash</h2><p>Target crashes after settlement</p><button class="secondary" data-scenario="Crash">Use scenario →</button></div></div></section>
@@ -81,6 +87,99 @@
 <section id="reports" class="page"><div class="page-head compact"><div><div class="eyebrow">REPORTS</div><h1>Evidence-backed reports</h1><p>A compact record of what was tested, observed, and proven.</p></div><button class="secondary">Generate report</button></div><div class="report panel"><div class="report-top"><div><span class="label">TEST REPORT</span><h2>T-024 / Secretariat / Lost Delivery</h2></div><span class="badge unresolved">UNRESOLVED</span></div><div class="report-grid"><div><span>AGENT</span><b>argus-buyer-01</b></div><div><span>TARGET</span><b>Secretariat</b></div><div><span>ASSERTIONS</span><b>4 evaluated</b></div><div><span>EVIDENCE</span><b>12 events</b></div></div><div class="report-note"><b>Resolution</b><p>Delivery outcome remains unproven. The report preserves the distinction between missing observation and proven failure.</p></div></div></section>
 
 <section id="settings" class="page"><div class="page-head compact"><div><div class="eyebrow">SETTINGS</div><h1>Control room preferences</h1><p>Presentation settings are local to this prototype.</p></div></div><div class="settings-list panel"><label>Default target <select><option>Secretariat</option><option>Custom HTTP target</option></select></label><label>Evidence verbosity <select><option>Detailed</option><option>Standard</option><option>Minimal</option></select></label><label>Theme <button id="themeSetting" class="secondary">Toggle light / dark</button></label></div></section>
+
+<section id="result" class="page">
+  <div class="page-head compact">
+    <div>
+      <div class="eyebrow">TEST RESULT / T-024</div>
+      <h1>Lost Delivery</h1>
+      <p>Review what was expected, what was observed, and why delivery remains unverified.</p>
+    </div>
+    <button class="secondary" data-page="tests">← Back to tests</button>
+  </div>
+
+  <div class="result-notice">
+    <strong>Illustrative static result</strong>
+    <span>This view uses sample data. It does not represent a newly executed live test.</span>
+  </div>
+
+  <div class="result-status-grid">
+    <div class="panel result-status">
+      <span class="label">EXECUTION STATE</span>
+      <strong class="result-complete">COMPLETE</strong>
+      <small>The test evaluation finished.</small>
+    </div>
+    <div class="panel result-status">
+      <span class="label">VERDICT</span>
+      <strong class="result-unresolved">UNRESOLVED</strong>
+      <small>Delivery cannot be verified from available evidence.</small>
+    </div>
+    <div class="panel result-status">
+      <span class="label">CLASSIFICATION</span>
+      <strong class="result-code">DELIVERY_UNKNOWN</strong>
+      <small>Unknown delivery is not automatically failure.</small>
+    </div>
+  </div>
+
+  <div class="panel result-panel">
+    <div class="panel-title">
+      <div>
+        <span class="label">EVIDENCE REVIEW</span>
+        <h2>Expected → Observed → Missing</h2>
+      </div>
+    </div>
+
+    <div class="result-evidence-grid">
+      <article class="result-evidence expected">
+        <span class="result-step">01 / EXPECTED</span>
+        <h3>Requested work delivered</h3>
+        <p>The buyer should receive the requested result, supported by verifiable delivery evidence.</p>
+      </article>
+
+      <article class="result-evidence observed">
+        <span class="result-step">02 / OBSERVED</span>
+        <h3>Payment-related evidence</h3>
+        <p>The illustrative scenario includes payment settlement evidence. Settlement alone does not establish that the work was delivered.</p>
+      </article>
+
+      <article class="result-evidence missing">
+        <span class="result-step">03 / MISSING</span>
+        <h3>Delivery confirmation</h3>
+        <p>No verifiable delivery evidence is available in this result to confirm that the buyer received the requested work.</p>
+      </article>
+    </div>
+  </div>
+
+  <div class="panel result-panel">
+    <span class="label">ASSERTION EVALUATION</span>
+    <h2>What can the evidence prove?</h2>
+
+    <div class="result-assertion">
+      <span class="result-marker observed-marker">OBSERVED</span>
+      <div>
+        <strong>Payment-related evidence exists</strong>
+        <p>This supports the payment state only; it does not prove successful delivery.</p>
+      </div>
+    </div>
+
+    <div class="result-assertion">
+      <span class="result-marker missing-marker">UNKNOWN</span>
+      <div>
+        <strong>Requested work was delivered</strong>
+        <p>The available evidence does not establish delivery or prove that delivery failed.</p>
+      </div>
+    </div>
+
+    <div class="result-conclusion">
+      <span class="label">FINAL REASONING</span>
+      <h3>UNRESOLVED / DELIVERY_UNKNOWN</h3>
+      <p>The execution completed, but delivery remains unverified. More evidence is needed to determine the delivery outcome. Missing evidence alone is not proof of failure.</p>
+    </div>
+
+    <button class="secondary full" data-page="evidence">Inspect evidence stream →</button>
+  </div>
+</section>
+
 </main>
 </div>
 <div id="modal" class="modal hidden"><div class="modal-backdrop"></div><div class="dialog"><button id="closeModal" class="close">×</button><span class="eyebrow">NEW TEST</span><h2>Configure a controlled run</h2><label>Agent<select><option>argus-buyer-01</option><option>external-agent</option></select></label><label>Scenario<select id="scenarioSelect"><option>Lost Delivery</option><option>Duplicate</option><option>Crash</option><option>Payment Retry</option><option>Seller Timeout</option></select></label><label>Target<select><option>Secretariat</option><option>External HTTP Target</option></select></label><div class="fault-options"><button class="chip selected">Delivery Loss</button><button class="chip">Duplicate</button><button class="chip">Slow</button><button class="chip">Crash</button></div><button id="execute" class="primary full">Execute demo test →</button><small class="modal-note">Demo only. No real payment, authentication, or backend call is made.</small></div></div>

@@ -15,6 +15,21 @@ modal.querySelector(".modal-backdrop").onclick=closeModal;
 document.querySelectorAll(".fault-options .chip").forEach(c=>c.onclick=()=>{document.querySelectorAll(".fault-options .chip").forEach(x=>x.classList.remove("selected"));c.classList.add("selected")});
 document.querySelectorAll(".fault-row .chip").forEach(c=>c.onclick=()=>{document.querySelectorAll(".fault-row .chip").forEach(x=>x.classList.remove("selected"));c.classList.add("selected")});
 document.querySelectorAll("[data-scenario]").forEach(b=>b.onclick=()=>{openModal();document.getElementById("scenarioSelect").value=b.dataset.scenario});
-document.querySelectorAll("tbody tr[data-detail]").forEach(r=>r.onclick=()=>{showPage("evidence")});
-document.getElementById("execute").onclick=()=>{closeModal();showPage("tests");setTimeout(()=>alert("Demo run staged as T-025. No backend call was made."),120)});
-document.addEventListener("keydown",e=>{if(e.key==="Escape")closeModal()});
+document.querySelectorAll("tbody tr[data-detail]").forEach(r=>{
+  const openResult=()=>{
+    if (r.dataset.detail === "T-024") {
+  
+ showPage("result"); 
+} else {
+  showPage("evidence");
+}
+  };
+  r.addEventListener("click",openResult);
+  r.addEventListener("keydown",e=>{
+    if((e.key==="Enter"||e.key===" ")&&e.target===r){
+      e.preventDefault();
+      openResult();
+    }
+  });
+});
+document.getElementById("execute").onclick=()=>{closeModal();showPage("tests");setTimeout(()=>alert("Demo run staged as T-025. No backend call was made."),120)};
