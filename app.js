@@ -16,13 +16,12 @@ document.querySelectorAll(".fault-options .chip").forEach(c=>c.onclick=()=>{docu
 document.querySelectorAll(".fault-row .chip").forEach(c=>c.onclick=()=>{document.querySelectorAll(".fault-row .chip").forEach(x=>x.classList.remove("selected"));c.classList.add("selected")});
 document.querySelectorAll("[data-scenario]").forEach(b=>b.onclick=()=>{openModal();document.getElementById("scenarioSelect").value=b.dataset.scenario});
 document.querySelectorAll("tbody tr[data-detail]").forEach(r=>{
-  const openResult=()=>{
+    const openResult = () => {
     if (r.dataset.detail === "T-024") {
-  
- showPage("result"); 
-} else {
-  showPage("evidence");
-}
+      showPage("result");
+    } else {
+      showPage("evidence");
+    }
   };
   r.addEventListener("click",openResult);
   r.addEventListener("keydown",e=>{
