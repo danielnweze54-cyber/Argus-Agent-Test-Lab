@@ -16,6 +16,7 @@
 //   отдельный PR, вне scope текущих изменений.
 
 import { RunOrchestrator } from '../core/RunOrchestrator';
+import { runBlockBCommand } from './blockBCommand';
 import { AgentController } from '../core/AgentController';
 import {
   TargetAdapterRegistry,
@@ -207,11 +208,18 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];
 
+  // Блок B: платёжные фолт-сценарии (S-BC/S-BS) — собственный раннер,
+  // гейты ролей и exit-коды 0/1/2 (см. src/cli/blockBCommand.ts).
+  if (args.includes('--block')) {
+    process.exit(await runBlockBCommand(args));
+  }
+
   if (!command) {
     console.log('Usage: argus <command> [scenario]');
     console.log('Commands:');
     console.log('  list              - List available scenarios');
     console.log('  run <scenarioId>  - Run a specific scenario (e.g., S1)');
+    console.log('  Block B:          - list|gate|run --block B --family BC|BS (see src/cli/blockBCommand.ts)');
     process.exit(1);
   }
 

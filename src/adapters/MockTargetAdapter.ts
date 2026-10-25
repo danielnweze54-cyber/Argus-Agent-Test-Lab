@@ -42,7 +42,7 @@ export interface MockTargetConfig extends TargetConnectionConfig {
   cannedResponses?: Record<string, unknown>;
 
   /**
-   * R2 lifecycle-observation plumbing (see docs/evidence-source-map.md):
+   * R2 lifecycle-observation plumbing (see docs/guide/evidence-source-map.md):
    * per-action-type list of lifecycle observations that the simulated source
    * (Sut / settlement layer) is configured to report on a successful response.
    *
@@ -61,7 +61,7 @@ export interface MockTargetConfig extends TargetConnectionConfig {
  * fact reported by the simulated source. Kept as a narrow allow-list so that
  * no speculative lifecycle emitter can enter the evidence path through the
  * mock: a type may appear here only if a canonical scenario assertion already
- * consumes it (docs/evidence-source-map.md, section 2).
+ * consumes it (docs/guide/evidence-source-map.md, section 2).
  *
  * Deliberately absent (no legitimate source yet — see R1 map):
  * delivery_received (edge-mediated), recovery_completed (crash/restart),

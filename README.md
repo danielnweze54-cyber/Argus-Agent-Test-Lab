@@ -105,10 +105,32 @@ Scenarios are controlled and reproducible rather than random chaos.
 
 ## Public documentation
 
-- [Argus Product Boundary](docs/argus-product-boundary.md)
-- [What is Argus?](docs/what-is-argus.md)
-- [AI Agent Testing](docs/agent-testing.md)
-- [Evidence and Verdicts](docs/evidence-and-verdicts.md)
+- [Argus Product Boundary](docs/guide/argus-product-boundary.md)
+- [What is Argus?](docs/guide/what-is-argus.md)
+- [AI Agent Testing](docs/guide/agent-testing.md)
+- [Evidence and Verdicts](docs/guide/evidence-and-verdicts.md)
+
+## Repository layout
+
+```
+app/                 product landing page (static, vercel outputDirectory)
+src/                 engine: core, adapters, scenarios, blockb runners, CLI, tests
+sut-x402/            live x402 stand: official-client drivers (client_v2/v3/v4) + server
+tools/               SUT servers and rail adapters (paypal-adapter with live evidence)
+docs/
+  guide/             product/protocol guides and evidence discipline
+  scenarios/         block specs (A/B/C/D) and scenario inventory
+  block-b/           payment program: MATRIX (RU source of truth), EN matrix, REGISTRY, fixtures
+  audits/            dated audits and boundary reviews
+  plans/             roadmaps, backlogs, business notes
+attestations/        signed, hash-chained records: seals, findings, INDEX, keys
+engagements/         per-client test campaigns: plan, connectors, runs, reports
+scripts/             reproducibility scripts for committed evidence
+```
+
+Evidence paths pinned by seals (e.g. `docs/block-b/fixtures/…`,
+`docs/scenarios/b4-block-d-findings.md`, `tools/paypal-adapter/evidence/…`)
+are permanent: files are reorganized around them, never under new names.
 
 ## Commercial direction
 

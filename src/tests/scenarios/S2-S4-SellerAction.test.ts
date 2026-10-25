@@ -9,7 +9,7 @@
  *    emit path (delivery_started / delivery_completed from resource-server-1).
  * 3. Assertions of S2/S4 are NOT modified; their honest post-R3 status is
  *    asserted (both remain INCONCLUSIVE until Sut-reported success /
- *    terminal-state plumbing lands — see docs/evidence-source-map.md).
+ *    terminal-state plumbing lands — see docs/guide/evidence-source-map.md).
  * 4. S6 fault remains declared-only on a lifecycle trigger (not touched).
  */
 
