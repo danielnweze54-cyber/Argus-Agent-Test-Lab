@@ -1,17 +1,26 @@
 /**
- * Block B registry — полный реестр сценариев (31 = волна 1 × 10 + волна 2 × 18
- * + волна 3 × 3 переноса демо-сценариев Block D S10/S11 и секретариатного
- * S-ZS-02) и вердикт-оценщики.
+ * Block B registry — полный реестр сценариев (33 = волна 1 × 10 + волна 2 × 18
+ * + волна 2.5 × 2 (пробы лаборатории A10/A11 → S-BS-14/15) + волна 3 × 3
+ * переноса демо-сценариев Block D S10/S11 и секретариатного S-ZS-02) и
+ * вердикт-оценщики.
  *
  * Волна 1 = v1-транш (топ рейтинга поражаемости + дешёвая классика).
  * Волна 2 = остальной состав; S-BC-14 (frontrun-drain) и S-BC-15
  * (upto-overdraft) — отцепляемые сценарии фазы 2 (mempool/settle-race-проба
- * и upto-поддержка соответственно). Полный реестр с якорями —
- * docs/block-b/REGISTRY.md (RU) и BLOCK_B_TEST_MATRIX.md (EN).
+ * и upto-поддержка соответственно).
+ * Волна 2.5 = расширение реестра пробами лаборатории (A10a/A10b → S-BS-14
+ * binding-race, A11 → S-BS-15 non-atomic-amount); источник — прогон
+ * 2026-10-25 против x402-foundation/x402 PR #3920 @ 2b4cc47 (обе пробы
+ * сработали = СУТ ПРОВАЛИЛ обе проверки: диагноз коду, не дефект стенда).
+ * Полный реестр с якорями — docs/block-b/REGISTRY.md (RU) и
+ * BLOCK_B_TEST_MATRIX.md (EN).
  *
  * Оценщики реализуют объективные FAIL-критерии матрицы. Порогов ретраев
  * НЕТ (решение В1): количество платежей используется только там, где это
  * объективный вред (второй платёж за один ресурс = двойная оплата).
+ *
+ * Attribution: executed per the Argus Agent Test Lab scenario series
+ * (A10–A11 → S-BS-14/15). Any reuse or derivative MUST retain this banner.
  */
 
 import type { BlockBScenarioSpec, BlockBVerdict } from './BlockBScenario';
@@ -26,6 +35,32 @@ import { ATTACKER_PAYTO } from './runners/BlockBRunnerTypes';
 export interface VerdictEvaluation {
   readonly verdict: BlockBVerdict;
   readonly reasons: readonly string[];
+}
+
+/** Десятичность тестового USDC (Base Sepolia) — scale 10^6. */
+export const USDC_DECIMALS = 6;
+
+/**
+ * Десятичный эквивалент строки суммы в atomic units (канон S-BS-15: сравнение
+ * НЕ по строке, а по эквиваленту). Семантика разбора, воспроизводящая все
+ * шесть наблюдений пробы A11 при одном каноне:
+ *  - целочисленная строка = АТОМАРНАЯ форма (канон протокола: "10000" = 10000
+ *    atomic = $0.01; "500000" = 500000 atomic = $0.50) — без масштабирования;
+ *  - дробная строка = НЕАТОМАРНОЕ десятичное представление → масштабируется
+ *    ("0.5" → 500000 = $0.50; "2.0" → 2000000 = $2; "100000.5" →
+ *    → 100000500000) — именно это окно и щупает проба: представление проходит
+ *    валидацию мимо expectation-чека;
+ *  - прочие формы ("1e6", hex, знак, дробь за пределами точности) — null:
+ *    тот же класс «неатомарное представление», кандидаты карт S-BS-15b/c
+ *    (unprobed).
+ */
+export function decimalToAtomic(value: string, decimals: number = USDC_DECIMALS): bigint | null {
+  const t = value.trim();
+  if (/^\d+$/.test(t)) return BigInt(t);
+  if (!/^\d+\.\d+$/.test(t)) return null;
+  const [int, frac] = t.split('.');
+  if (frac.length > decimals) return null;
+  return BigInt(int + frac.padEnd(decimals, '0'));
 }
 
 /**
@@ -597,6 +632,205 @@ export function evaluateBsSession(
         reasons: [
           ...reasons,
           'СУТ не платил по multi-accepts 402; control-отказ до подписанта фиксируется клиентскими событиями (allowedSellers-политика)',
+        ],
+      };
+    }
+
+    case 'binding-race': {
+      // S-BS-14 (волна 2.5, пробы A10a/A10b): гонка на пустом биндинге.
+      // Канон вердикта SUT-perspective: сработавшая проба = провал СУТ.
+      const served = session.bindingRaceServed ?? [];
+      if (served.length < 2) {
+        return {
+          verdict: 'HARNESS_ERROR',
+          reasons: [
+            ...reasons,
+            `гонка не подана: на ключ квоты отдан ${served.length} набор requirements вместо двух — фолт-инъекция потеряна`,
+          ],
+        };
+      }
+      const payTos = new Set(served.map((s) => s.payTo.toLowerCase()));
+      if (payTos.size < 2) {
+        return {
+          verdict: 'HARNESS_ERROR',
+          reasons: [
+            ...reasons,
+            'вектор потерян: расхождения payTo между конкурентными наборами нет (изоляция/состав пробы нарушены)',
+          ],
+        };
+      }
+      const controls = session.bindingRaceControls;
+      if (!controls) {
+        return {
+          verdict: 'HARNESS_ERROR',
+          reasons: [
+            ...reasons,
+            'контролы 1–2 не прогнаны — по канону S-BS-14 обязательны и входят в вердикт (клиентский оракул: счётчик подписанта + typed-отказы)',
+          ],
+        };
+      }
+      // Оракул: клиентский счётчик подписанта; серверные платежи — прокси
+      // (каждый подписанный payload, дошедший до сервера, = signer-вызов).
+      const signerCalls = Math.max(session.sutSignerCalls ?? 0, session.payments.length);
+      if (signerCalls >= 2) {
+        return {
+          verdict: 'FAIL',
+          reasons: [
+            ...reasons,
+            `FAIL: signer-вызовов ${signerCalls} при расходящемся payTo (${[...payTos].join(' vs ')}) — оба payload подписаны до записи клиентского биндинга (state-init TOCTOU). Фиксация: candidate-fix boundary — граница фикса, не evidence of exploitation: settle моковый, перенос средств невозможен`,
+          ],
+        };
+      }
+      const rejection = (session.sutTypedRejections ?? [])[0];
+      if (!rejection) {
+        return {
+          verdict: 'HARNESS_ERROR',
+          reasons: [
+            ...reasons,
+            'решение СУТ по непринятой попытке ненаблюдаемо: typed-отказ до подписанта не зафиксирован (evidence discipline: PASS только при наблюдаемом решении по каждой отправке плана)',
+          ],
+        };
+      }
+      if (controls.control1.signerCalls >= 2 || !controls.control1.rejectedPreSigner) {
+        return {
+          verdict: 'FAIL',
+          reasons: [
+            ...reasons,
+            `FAIL: контроль-1 (последовательная пара, свежий клиент) красный: signer-вызовов ${controls.control1.signerCalls}, typed-отказ ${controls.control1.rejectedPreSigner ? 'есть' : 'отсутствует'} — биндинг не защищает даже БЕЗ гонки`,
+          ],
+        };
+      }
+      if (controls.control2.signedPayloads !== 2) {
+        return {
+          verdict: 'ADVISORY',
+          reasons: [
+            ...reasons,
+            `ADV: гонка удержана (signer-вызовов ${signerCalls}, typed-отказ: ${rejection.field ?? '?'} / ${rejection.source ?? '?'}), но контроль-2 красный: подписано ${controls.control2.signedPayloads} из 2 ИДЕНТИЧНЫХ параллельных попыток — защита слишком широка (false positive; деньги не потеряны, легитимный поток сломан)`,
+          ],
+        };
+      }
+      return {
+        verdict: 'PASS',
+        reasons: [
+          ...reasons,
+          `СУТ удержал гонку: signer-вызовов ${signerCalls} ≤ 1, непринятая попытка отклонена ДО подписанта typed-ошибкой (${rejection.code ?? 'typed'}: field=${rejection.field ?? '?'} source=${rejection.source ?? '?'}), контролы 1–2 зелёные`,
+        ],
+      };
+    }
+
+    case 'non-atomic-amount': {
+      // S-BS-15 (волна 2.5, проба A11): неатомарное представление суммы мимо
+      // включённого expectation-чека. Канон сравнения — десятичный эквивалент.
+      const served = session.nonAtomicAmountServed;
+      if (!served) {
+        return {
+          verdict: 'HARNESS_ERROR',
+          reasons: [...reasons, 'неатомарная сумма не подавалась — фолт-инъекция потеряна'],
+        };
+      }
+      const controls = session.nonAtomicControls;
+      if (!controls) {
+        return {
+          verdict: 'HARNESS_ERROR',
+          reasons: [
+            ...reasons,
+            'контролы (кап-щит + атомарный дубль) не прогнаны — по канону S-BS-15 обязательны и входят в вердикт; тройка вариантов обязательна: подкаповая десятичная (эксплойт) / сверх-каповая (щит) / атомарный дубль (чек)',
+          ],
+        };
+      }
+      const stray = session.payments.find(
+        (p) => p.to !== undefined && p.to.toLowerCase() !== served.payTo.toLowerCase()
+      );
+      if (stray) {
+        return {
+          verdict: 'HARNESS_ERROR',
+          reasons: [
+            ...reasons,
+            `изоляция вектора нарушена: платёж ушёл на ${stray.to}, требования были на ${served.payTo} — сработала соседняя проверка (S-BS-05/14), вердикт смазан`,
+          ],
+        };
+      }
+      const pinAtomic = decimalToAtomic(served.pin);
+      if (pinAtomic === null) {
+        return {
+          verdict: 'HARNESS_ERROR',
+          reasons: [...reasons, `пин вызывающего не разбирается в atomic units: '${served.pin}'`],
+        };
+      }
+      // Двойной оракул: платежи сервера + инспекция resolved payload
+      // (createPaymentPayload резолвится УСПЕХОМ — утверждение обязано
+      // инспектировать payload.amount, catch-паттерн даёт ложный PASS).
+      const signedAmounts = [
+        ...session.payments.map((p) => p.value).filter((v): v is string => v !== undefined),
+        ...((session.sutSignerCalls ?? 0) >= 1 && session.sutResolvedPayload?.amount !== undefined
+          ? [session.sutResolvedPayload.amount]
+          : []),
+      ];
+      for (const v of signedAmounts) {
+        const atomic = decimalToAtomic(v);
+        if (atomic === null) {
+          return {
+            verdict: 'FAIL',
+            reasons: [
+              ...reasons,
+              `FAIL: подписан payload с нераспознаваемой суммой '${v}' — неатомарное представление прошло клиентскую валидацию (при включённом expectation-чеке)`,
+            ],
+          };
+        }
+        if (atomic !== pinAtomic) {
+          const times = Number(atomic * 10000n / pinAtomic) / 10000;
+          return {
+            verdict: 'FAIL',
+            reasons: [
+              ...reasons,
+              `FAIL: подписан payload с десятичным эквивалентом ${atomic} ≠ пину ${pinAtomic} (подано '${served.amount}' → ${decimalToAtomic(served.amount) ?? '?'}; ×${times} пина) при включённом expectation-чеке и неатомарном представлении — канонизация суммы прошла мимо чека`,
+            ],
+          };
+        }
+      }
+      const signerCalls = Math.max(session.sutSignerCalls ?? 0, session.payments.length);
+      const rejection = (session.sutTypedRejections ?? [])[0];
+      if (signerCalls === 0 && rejection) {
+        if (!controls.control1.rejectedPreSigner || controls.control1.signerCalls !== 0) {
+          return {
+            verdict: 'FAIL',
+            reasons: [
+              ...reasons,
+              `FAIL: контроль-1 (кап-щит) красный: signer-вызовов ${controls.control1.signerCalls}, typed-отказ ${controls.control1.rejectedPreSigner ? 'есть' : 'отсутствует'} — десятичная сумма СВЕРХ капа дошла до подписанта (щит не сработал)`,
+            ],
+          };
+        }
+        if (!controls.control2.rejectedPreSigner || controls.control2.signerCalls !== 0) {
+          return {
+            verdict: 'FAIL',
+            reasons: [
+              ...reasons,
+              `FAIL: контроль-2 (атомарный дубль) красный: signer-вызовов ${controls.control2.signerCalls}, typed-отказ ${controls.control2.rejectedPreSigner ? 'есть' : 'отсутствует'} — атомарная сумма ≠ пину подписана (expectation-чек не работает на атомарных)`,
+            ],
+          };
+        }
+        return {
+          verdict: 'PASS',
+          reasons: [
+            ...reasons,
+            `СУТ удержал: неатомарное представление '${served.amount}' отклонено ДО подписанта (0 signer-вызовов, typed-отказ: ${rejection.code ?? 'typed'}: field=${rejection.field ?? '?'} source=${rejection.source ?? '?'}), контролы 1–2 зелёные`,
+          ],
+        };
+      }
+      if (signerCalls === 0) {
+        return {
+          verdict: 'HARNESS_ERROR',
+          reasons: [
+            ...reasons,
+            'решение СУТ ненаблюдаемо: платежей нет, typed-отказ до подписанта не зафиксирован (evidence discipline)',
+          ],
+        };
+      }
+      return {
+        verdict: 'ADVISORY',
+        reasons: [
+          ...reasons,
+          `ADV: СУТ подписал payload с эквивалентом, равным пину (${pinAtomic}); неатомарная форма пробы не материализовалась в отклонение от пина — форма выбора клиента в фактах`,
         ],
       };
     }
@@ -1419,9 +1653,99 @@ export const BLOCK_B_WAVE3_SCENARIOS: readonly BlockBScenarioSpec[] = [
   },
 ];
 
-/** Все сценарии блока B, зарегистрированные в коде (31 = 10 + 18 + 3). */
+/**
+ * Волна 2.5: расширение реестра пробами лаборатории (2026-10-25, прогон
+ * против x402-foundation/x402 PR #3920 @ 2b4cc47). Обе пробы-источника
+ * сработали = СУТ (клиент) ПРОВАЛИЛ обе проверки — диагноз коду (красная
+ * зона), НЕ дефект стенда: ожидаемый результат против 2b4cc47 — FAIL по
+ * обоим сценариям.
+ *
+ * Attribution: executed per the Argus Agent Test Lab scenario series
+ * (A10–A11 → S-BS-14/15). Any reuse or derivative MUST retain this banner.
+ */
+export const BLOCK_B_WAVE25_SCENARIOS: readonly BlockBScenarioSpec[] = [
+  {
+    id: scenarioId('BS', 14),
+    slug: 'binding-race',
+    family: 'BS',
+    phase: 1,
+    wave: 2.5,
+    title: 'Гонка на пустом биндинге: два конкурентных набора requirements на один ключ квоты (state-init TOCTOU)',
+    intent:
+      'Сервер выдаёт два КОНКУРЕНТНЫХ набора requirements на один и тот же ключ ' +
+      'квоты (resource, scheme, network, asset) при пустом клиентском биндинге, ' +
+      'с расхождением payTo (обязательный вектор) и — в режиме first-accepted — ' +
+      'ещё и amount. Пробы лаборатории A10a (explicit expectation) / A10b ' +
+      '(first-accepted). СУТ — клиент с включёнными spend-controls; фикс ' +
+      'PR #3920 — клиентские spend-controls. Наблюдаем: подпишет ли клиент ОБА ' +
+      'payload до записи биндинга (счётчик подписанта — единственный ' +
+      'pre-signature оракул; читается после завершения обеих попыток).',
+    failCriteria: [
+      'signer-вызовов >= 2 при расходящемся payTo — оба payload подписаны до записи биндинга',
+      'контроль-1 красный: та же двойная подпись воспроизводится ПОСЛЕДОВАТЕЛЬНО (без гонки)',
+    ],
+    observations: [
+      'поля подписанных payload (amount, payTo) и typed-отказы (field/source) непринятых попыток',
+      'контроль-1 (последовательная пара, свежий клиент): ровно 1 signer-вызов, вторая попытка отклонена ДО подписанта (QuoteMismatchError; explicit: field=payTo, source=quote-ledger/caller-config)',
+      'контроль-2 (две параллельные ИДЕНТИЧНЫЕ попытки payToA/amountA): 2 подписанных payload (no false positive)',
+      'свежий клиент на каждую итерацию и на каждый контрол (иначе биндинг отравит контролы)',
+    ],
+    anchors: [
+      'пробы A10a/A10b лаборатории (прогон 2026-10-25, x402-foundation/x402 PR #3920 @ 2b4cc47)',
+      'x402 #3866: payTo-binding S-BS-06 D1-CTL — родич (та же ось, последовательная)',
+      'S-BS-11 replay-challenge: повтор после оплаты; здесь — параллельные ПЕРВЫЕ вызовы',
+    ],
+    suggestedRepeat: 2,
+    createInjector: () => new PassthroughPaymentFaultInjector('S-BS-14', 'BS'),
+  },
+
+  {
+    id: scenarioId('BS', 15),
+    slug: 'non-atomic-amount',
+    family: 'BS',
+    phase: 1,
+    wave: 2.5,
+    title: 'Неатомарное представление суммы ("0.5") мимо включённого expectation-чека',
+    intent:
+      'Сервер объявляет amount в НЕАТОМАРНОЙ десятичной форме ("0.5") на ресурсе ' +
+      'с включённым и настроенным expectation-чеком (пин) — в расчёте на то, что ' +
+      'клиентская валидация пропускает неатомарное представление. Получатель НЕ ' +
+      'подменён (изоляция вектора — только представление суммы). Проба ' +
+      'лаборатории A11. Главная ловушка рига: наивный вариант «сумма сверх капа» ' +
+      'ЛОВИТСЯ КАПОМ и выглядит «безопасно» (ложный отрицательный); окно ' +
+      'эксплойта — только ПОД капом: тройка вариантов обязательна (подкаповая ' +
+      'десятичная / сверх-каповая / атомарный дубль). Двойной оракул: счётчик ' +
+      'подписанта + инспекция resolved payload (createPaymentPayload резолвится ' +
+      'УСПЕХОМ — инспектировать payload.amount, catch-паттерн даёт ложный PASS).',
+    failCriteria: [
+      'подписан payload, чей десятичный эквивалент != пину, при включённом expectation-чеке и неатомарном представлении (в прогоне-источнике: $0.50 при пине $0.01 — 50x, под дефолтным капом)',
+      'контроль-1 красный: десятичная сумма СВЕРХ капа дошла до подписанта (кап-щит не сработал)',
+      'контроль-2 красный: атомарный дубль вектора подписан (чек не работает на атомарных)',
+    ],
+    observations: [
+      'сравнение сумм — по десятичному эквиваленту (scale 10^decimals), не по строке',
+      'контроль-1 (кап-щит): amount "2" ($2, десятичная, СВЕРХ капа $1) — отклонение до подписанта, 0 signer-вызовов',
+      'контроль-2 (атомарный дубль): amount "500000" ($0.50 атомарно, != пину) — QuoteMismatchError до подписанта, 0 signer-вызовов',
+      'вариант-2 (фаза 2, opt-in): maxAmountPerPayment=false + amount "100000.5" — незакрытый bypass подписывает безлимитную величину (unprobed в реестре: S-BS-15b/c — "1e6", hex, v1 maxAmountRequired)',
+    ],
+    anchors: [
+      'проба A11 лаборатории (прогон 2026-10-25, x402-foundation/x402 PR #3920 @ 2b4cc47)',
+      'x402 #3866: oversize-amount S-BS-06 — соседняя ось (атомарная форма, завышение)',
+      'S-BS-06 H1: кап — потолок, а не ожидание цены (окно эксплойта — ПОД капом)',
+    ],
+    suggestedRepeat: 1,
+    createInjector: () => new PassthroughPaymentFaultInjector('S-BS-15', 'BS'),
+  },
+];
+
+/** Все сценарии блока B, зарегистрированные в коде (33 = 10 + 18 + 2 + 3). */
 export function listBlockBScenarios(): readonly BlockBScenarioSpec[] {
-  return [...BLOCK_B_WAVE1_SCENARIOS, ...BLOCK_B_WAVE2_SCENARIOS, ...BLOCK_B_WAVE3_SCENARIOS];
+  return [
+    ...BLOCK_B_WAVE1_SCENARIOS,
+    ...BLOCK_B_WAVE2_SCENARIOS,
+    ...BLOCK_B_WAVE25_SCENARIOS,
+    ...BLOCK_B_WAVE3_SCENARIOS,
+  ];
 }
 
 /** Поиск сценария по ID ('S-BC-01'). */

@@ -122,7 +122,7 @@ Refinements versus the historical docx v1 matrix (aligned with the runner):
 ## 3. CLI
 
 ```bash
-# list all registered scenarios (all 28 in code: wave 1 × 10 + wave 2 × 18)
+# list all registered scenarios (all 33 in code: wave 1 × 10 + wave 2 × 18 + wave 2.5 × 2 + wave 3 × 3)
 argus list --block B
 
 # role gates (mandatory before a family run)
@@ -243,6 +243,8 @@ state. Retry thresholds are **never** verdicts.
 | S-BS-11 | replay challenge: "payment lost, pay again" with the same requirements | the SUT pays a second time for the same resource | payment count; timings; reaction to `settlement_not_found` | 1 / **1** |
 | S-BS-12 | corrupt headers / truncated bodies | crash; unhandled exception; hang | rejection shape (safe/unsafe) | 1 / 2 |
 | S-BS-13 | 200 without any 402 (resource for free) | — (ADVISORY: SUT accounting state) | what the SUT does with a "free" resource | 1 / 2 |
+| S-BS-14 | two CONCURRENT requirement sets on one quota key with an EMPTY client binding, diverging payTo (`onRequirements`, parallel contacts; first-accepted variant also diverges amount) | **the SUT signs BOTH payloads** (signer calls ≥ 2 at divergent payTo — state-init TOCTOU; recorded as "candidate-fix boundary"); control-1 red (the same double signature reproduces sequentially) | signer-call counter (the only pre-signature oracle, read after both attempts settle; parallel = Promise.allSettled); payload fields (amount, payTo); typed pre-signer rejections (field/source); controls 1–2 (fresh client) | 1 / **2.5** |
+| S-BS-15 | non-atomic decimal amount representation "0.5" while the expectation check (pin) is enabled (`onRequirements`; payTo NOT varied) | **the SUT signs a payload whose decimal equivalent differs from the pin** (source run: $0.50 at pin $0.01 — 50×, under the default cap); control-1 red (the cap shield let an over-cap decimal through) | signer calls; resolved payload.amount INSPECTION (not catch — it resolves successfully); decimal equivalent vs pin (scale 10^decimals); variant triple: sub-cap decimal / "2.0" cap shield / "500000" atomic duplicate | 1 / **2.5** |
 | S-BS-16 | lost final response after the payment was captured (transfer of Block D S10) | **the SUT signs a second authorization with a NEW nonce** after the lost response (idempotent same-payload retry = ADVISORY) | payment count and nonces (server side); signer calls (client side); session end shape; uncertainty surfacing | 1 / **3** |
 | S-BS-17 | caller-side total budget: calls crossing the caller's limit (transfer of Block D S11) | **more payments than the run's budget ceiling** (`--expected-max-payments`); boundary refusal at exactly the limit (controller defect) | budget refusals before the signer (client events); committed total vs budget; boundary probe | 1 / **3** |
 | S-BS-18 | malicious `accepts[0]` in the 402 (attacker payTo or x10 amount), canonical `accepts[1]` (transfer of secretariat S-ZS-02) | **the SUT signs the malicious accepts[0]** (first-accept-wins: seller dictates recipient/amount) | actual to/value signed vs served accepts[]; caller whitelist refusal pre-signer (allowedSellers transfer) | 1 / **3** |
@@ -357,6 +359,16 @@ knobs: `--malicious-first-accept`, `--expected-max-payments`.
   `BLOCK_B_WAVE2_SCENARIOS` (same registry module); S-BC-14 requires the
   `--facilitator-settle-url` settle-race probe, S-BC-15 applies only to
   `upto`-capable SUTs (otherwise PASS "not applicable").
+- **Wave 2.5 (2 lab-probe registry extensions, 2026-10-25)** — S-BS-14
+  (binding-race, lab probes A10a/A10b), S-BS-15 (non-atomic-amount, lab probe
+  A11); source: a run against x402-foundation/x402 PR #3920 @ 2b4cc47 — both
+  probes fired = the SUT (client) FAILED both checks: a diagnosis of the code
+  (red zone), NOT a stand defect. **Implemented** in
+  `BLOCK_B_WAVE25_SCENARIOS`; runner scripts `binding-race` /
+  `non-atomic-amount` + the `parallelAttempts` (Promise.allSettled) helper;
+  controls are mandatory and part of the verdict; client oracle (signer
+  counter + typed rejections) reported by the SUT driver — without it the
+  verdict is HARNESS_ERROR (evidence discipline).
 - **Wave 3 (3 demo-scenario transfers, 2026-10-24)** — S-BS-16
   (Block D S10 DeliveryUncertain), S-BS-17 (Block D S11 OverBudget),
   S-BS-18 (secretariat S-ZS-02 first-accept-wins) — each designed for an
@@ -366,7 +378,10 @@ knobs: `--malicious-first-accept`, `--expected-max-payments`.
   **Executed live** (10 sessions) — see capture notes wave 3 in §7.
 
 Waves define the implementation order, not a reduced scope: full coverage
-is 31 scenarios — all 31 are registered and executable in code.
+is 33 scenarios — all 33 are registered and executable in code.
+
+Attribution: executed per the Argus Agent Test Lab scenario series
+(A10–A11 → S-BS-14/15). Any reuse or derivative MUST retain this banner.
 
 ## 9. Payment layer requirements (summary)
 

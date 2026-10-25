@@ -30,6 +30,25 @@
  *   corrupt-transport       — мусорный header + обрезанное тело (S-BS-12);
  *   premature-200           — ресурс бесплатно, без всякого 402 (S-BS-13).
  *
+ * Скрипты волны 2.5 (пробы лаборатории A10/A11 → S-BS-14/15):
+ *   binding-race         — два КОНКУРЕНТНЫХ набора requirements на один
+ *                          ключ квоты при пустом биндинге: контакт 1 —
+ *                          payToA, контакт 2 — payToB (first-accepted —
+ *                          ещё и amount); identical-режим — ИДЕНТИЧНЫЕ
+ *                          наборы (риг контроля-2, no false positive);
+ *   non-atomic-amount    — amount в НЕАТОМАРНОЙ десятичной форме ("0.5")
+ *                          при включённом expectation-чеке (пин); kind
+ *                          over-cap/atomic-control — риги контрола.
+ *
+ * Параллельность попыток СУТ (S-BS-14) создаёт ДРАЙВЕР клиента через
+ * parallelAttempts() (Promise.allSettled, НЕ Promise.all — частичный
+ * отказ не должен ронять сбор данных второй попытки). HTTP-сервер раннера
+ * обслуживает конкурентные контакты штатно (Node однопоточен; порядок
+ * контактов = порядок прибытия, расхождение гарантировано составом).
+ *
+ * Attribution: executed per the Argus Agent Test Lab scenario series
+ * (A10–A11 → S-BS-14/15). Any reuse or derivative MUST retain this banner.
+ *
  * Раннер НЕ выносит вердиктов — только записи сессии; вердикты считает
  * evaluateBsSession (BlockBRegistry).
  */
@@ -43,8 +62,31 @@ import type {
   BsSessionRecord,
   MaliciousFirstAccept,
   RequirementFieldDelta,
+  BindingRaceProbe,
+  BindingRaceControlOutcomes,
+  BindingRaceServed,
+  NonAtomicAmountProbe,
+  NonAtomicAmountServed,
+  NonAtomicControlOutcomes,
+  SutTypedRejection,
 } from './BlockBRunnerTypes';
 import { ATTACKER_PAYTO } from './BlockBRunnerTypes';
+
+/** Детерминированные адреса гонки S-BS-14 (канон проб A10a/A10b). */
+export const BINDING_RACE_PAYTO_A = '0x1111111111111111111111111111111111111111';
+export const BINDING_RACE_PAYTO_B = '0x2222222222222222222222222222222222222222';
+
+/**
+ * Параллельный запуск клиентских попыток (новая способность волны 2.5,
+ * S-BS-14): Promise.allSettled, НЕ Promise.all — частичный отказ одной
+ * попытки не должен ронять сбор данных второй. Счётчик подписанта читать
+ * ТОЛЬКО после завершения обеих попыток.
+ */
+export function parallelAttempts<T>(
+  tasks: readonly (() => Promise<T>)[]
+): Promise<PromiseSettledResult<T>[]> {
+  return Promise.allSettled(tasks.map((t) => t()));
+}
 
 /** Батарея биндинга S-BS-06 (follow-up #3866, раунд 2): пер-контактный оверрайд
  *  ПОЛЕЙ requirements. undefined поле — без изменения. Индекс = 402-контакт
@@ -80,6 +122,24 @@ export interface BsRunnerOptions {
   /** Проба S-BS-17: ожидание прогона — максимум платежей, разрешённых бюджетом
    *  вызывающего (оценщик сверяет фактические платежи сервера с этим потолком). */
   readonly expectedMaxPayments?: number;
+  /** Проба S-BS-14 (волна 2.5): риг гонки на пустом биндинге. Без пробы —
+   *  канонические дефолты слага: variant 'explicit', payToA/B детерминированы,
+   *  amountA = цена ресурса, amountB = amountA (first-accepted — ×10). */
+  readonly bindingRace?: BindingRaceProbe;
+  /** S-BS-14: исходы контрола 1–2 (драйвер СУТ; без них PASS недостижим). */
+  readonly bindingRaceControls?: BindingRaceControlOutcomes;
+  /** Проба S-BS-15 (волна 2.5): неатомарная сумма против пина. Без пробы —
+   *  канонический дефолт слага: amount "0.5", pin = цена ресурса. */
+  readonly nonAtomicAmount?: NonAtomicAmountProbe;
+  /** S-BS-15: исходы контрола 1–2 (кап-щит + атомарный дубль). */
+  readonly nonAtomicControls?: NonAtomicControlOutcomes;
+  /** Волна 2.5: клиентский оракул — число вызовов подписанта за сессию
+   *  (драйвер СУТ; единственный pre-signature оракул карт 14/15). */
+  readonly sutSignerCalls?: number;
+  /** Волна 2.5: typed-отказы СУТ до подписанта. */
+  readonly sutTypedRejections?: readonly SutTypedRejection[];
+  /** S-BS-15: resolved payload (инспекция, не catch — резолвится УСПЕХОМ). */
+  readonly sutResolvedPayload?: { readonly amount?: string; readonly payTo?: string };
   /** Окно наблюдения после первого платежа, мс (дефолт 2000; CLI — 120000). */
   readonly observeWindowMs?: number;
   /** Ожидание первого запроса СУТ, мс (дефолт 30000). */
@@ -99,6 +159,9 @@ interface BsSessionInternal {
   requirementsDeltasServed: RequirementFieldDelta[];
   lostResponseServed: boolean;
   maliciousFirstAcceptServed: MaliciousFirstAccept[];
+  /* Пробы волны 2.5 (S-BS-14/15). */
+  bindingRaceServed: BindingRaceServed[];
+  nonAtomicAmountServed?: NonAtomicAmountServed;
   /* Факты сценариев волны 2 (заполняются скриптами). */
   verifyRejections: number;
   resourceEchoMismatch: boolean;
@@ -110,6 +173,10 @@ interface BsSessionInternal {
 }
 
 const FAKE_TX = '0x' + 'ab'.repeat(32);
+
+/** Канонический получатель требований (не атакующий; база для S-BS-15, где
+ *  изоляция вектора требует НЕ варьировать payTo). */
+const CANONICAL_PAYTO = '0x9999999999999999999999999999999999999999';
 
 function buildRequirements(
   resourceUrl: string,
@@ -126,7 +193,7 @@ function buildRequirements(
         network: overrides?.network ?? 'eip155:84532',
         amount,
         asset: overrides?.asset ?? '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-        payTo: overrides?.payTo ?? '0x9999999999999999999999999999999999999999',
+        payTo: overrides?.payTo ?? CANONICAL_PAYTO,
         maxTimeoutSeconds: 60,
         // v2-спека: клиент строит EIP-712 домен по extra.name/extra.version;
         // без них официальный клиент (@x402/fetch v2) отказывается подписывать
@@ -213,6 +280,7 @@ export class BsRunner {
       requirementsDeltasServed: [],
       lostResponseServed: false,
       maliciousFirstAcceptServed: [],
+      bindingRaceServed: [],
       verifyRejections: 0,
       resourceEchoMismatch: false,
       prematureReceiptServed: false,
@@ -363,6 +431,17 @@ export class BsRunner {
       ...(session.maliciousFirstAcceptServed.length > 0
         ? { maliciousFirstAcceptServed: [...session.maliciousFirstAcceptServed] }
         : {}),
+      ...(session.bindingRaceServed.length > 0
+        ? { bindingRaceServed: [...session.bindingRaceServed] }
+        : {}),
+      ...(session.nonAtomicAmountServed ? { nonAtomicAmountServed: session.nonAtomicAmountServed } : {}),
+      ...(this.options.bindingRaceControls ? { bindingRaceControls: this.options.bindingRaceControls } : {}),
+      ...(this.options.nonAtomicControls ? { nonAtomicControls: this.options.nonAtomicControls } : {}),
+      ...(this.options.sutSignerCalls !== undefined ? { sutSignerCalls: this.options.sutSignerCalls } : {}),
+      ...(this.options.sutTypedRejections && this.options.sutTypedRejections.length > 0
+        ? { sutTypedRejections: [...this.options.sutTypedRejections] }
+        : {}),
+      ...(this.options.sutResolvedPayload ? { sutResolvedPayload: this.options.sutResolvedPayload } : {}),
       ...(this.options.expectedMaxPayments !== undefined
         ? { expectedMaxPayments: this.options.expectedMaxPayments }
         : {}),
@@ -473,6 +552,53 @@ export class BsRunner {
     resourceUrl: string
   ): boolean {
     switch (slug) {
+      case 'binding-race': {
+        // S-BS-14 (волна 2.5, пробы A10a/A10b): контакт 1 — payToA/amountA,
+        // контакт 2+ — payToB/amountB (расхождение payTo — обязательный
+        // вектор; first-accepted расходит ещё и amount). identical-режим —
+        // ИДЕНТИЧНЫЕ наборы на оба контакта (риг контроля-2, no false
+        // positive). Asset/network/scheme идентичны — изоляция вектора.
+        const probe = this.options.bindingRace;
+        const variant: BindingRaceServed['variant'] = probe?.identical
+          ? 'identical'
+          : (probe?.variant ?? 'explicit');
+        const contact = session.bindingRaceServed.length + 1;
+        const first = contact === 1 || probe?.identical === true;
+        const amountA = probe?.amountA ?? price;
+        const amountB =
+          probe?.amountB ??
+          (variant === 'first-accepted' ? (BigInt(amountA) * 10n).toString() : amountA);
+        const payTo = first ? (probe?.payToA ?? BINDING_RACE_PAYTO_A) : (probe?.payToB ?? BINDING_RACE_PAYTO_B);
+        const amount = first ? amountA : amountB;
+        const reqs = buildRequirements(resourceUrl, amount, 'canonical block-b resource', { payTo });
+        session.bindingRaceServed.push({ contact, payTo, amount, variant });
+        res.writeHead(402, {
+          'Content-Type': 'application/json',
+          'payment-required': base64(reqs),
+        });
+        res.end(JSON.stringify(reqs));
+        return true;
+      }
+
+      case 'non-atomic-amount': {
+        // S-BS-15 (волна 2.5, проба A11): amount в НЕАТОМАРНОЙ десятичной
+        // форме при включённом expectation-чеке (пин). Получатель НЕ подменён
+        // (изоляция вектора — только представление суммы; иначе сработает
+        // соседняя проверка S-BS-05/14 и смажет вердикт).
+        const probe = this.options.nonAtomicAmount;
+        const kind = probe?.kind ?? 'exploit';
+        const amount = probe?.amount ?? '0.5';
+        const pin = probe?.pin ?? price;
+        const reqs = buildRequirements(resourceUrl, amount, 'canonical block-b resource');
+        session.nonAtomicAmountServed = { amount, payTo: CANONICAL_PAYTO, pin, kind };
+        res.writeHead(402, {
+          'Content-Type': 'application/json',
+          'payment-required': base64(reqs),
+        });
+        res.end(JSON.stringify(reqs));
+        return true;
+      }
+
       case 'requirements-poison': {
         // S-BS-10: структурно невалидные requirements (не-hex payTo,
         // нечисловая сумма). Клиент обязан отбить их до подписания.

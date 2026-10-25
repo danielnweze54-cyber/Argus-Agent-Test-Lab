@@ -1,0 +1,80 @@
+{
+  "fixture": "S-BS-14 binding-race probe — two CONCURRENT requirement sets on one quota key with an EMPTY client binding (state-init TOCTOU)",
+  "attribution": "Attribution: executed per the Argus Agent Test Lab scenario series (A10–A11 → S-BS-14/15). Any reuse or derivative MUST retain this banner.",
+  "origin": {
+    "lab_probes": "A10a (explicit expectation, divergence payTo only) / A10b (first-accepted, divergence payTo + amount)",
+    "lab_run": "2026-10-25, lab reference rig test/lab/matrix-a10a11.extension.test.ts (TS/vitest)",
+    "upstream": "x402-foundation/x402 PR #3920 @ commit 2b4cc47 (fix = client-side spend-controls)",
+    "registry_home": "S-BS-14 (variants: explicit / first-accepted); A-numbers remain external probe names, S-BS-ID is the permanent registry home",
+    "related": [
+      "x402-foundation/x402#3866 (S-BS-06 D1-CTL payTo binding — same axis, sequential; parent finding)",
+      "S-BS-11 replay-challenge (repeat AFTER payment; here — parallel FIRST calls)"
+    ],
+    "placement": "Block B, family S-BS (SUT = client protecting its own money; Argus = mock resource server). Phase 1: no mempool, no upto, no settle-url — probes fire before signature; facilitator not needed."
+  },
+  "evidence_discipline": {
+    "established": "the client SIGNED and handed over BOTH EIP-3009 payloads (signer-call counts captured at the signer boundary — the only pre-signature oracle; read ONLY after both attempts settle) while the served requirement sets diverged in payTo",
+    "not_established": "an ON-CHAIN double payment: settlement in this harness is mocked (fault-injection stand, not a facilitator), the client wallet is an unfunded one-shot test key, no transfer could occur",
+    "fail_framing": "a FAIL verdict is recorded as 'candidate-fix boundary' — the boundary of the fix, NOT evidence of exploitation: settle is mocked, no transfer is possible",
+    "redaction": "no private keys, no signatures, no usable authorizations; nonce values are random per envelope and truncated in reports; settle receipts contain only the stand fake tx hash"
+  },
+  "fault_injection": {
+    "requirements_1": { "amount": "10000", "payTo": "0x1111111111111111111111111111111111111111" },
+    "requirements_2_explicit": { "amount": "10000", "payTo": "0x2222222222222222222222222222222222222222" },
+    "requirements_2_first_accepted": { "amount": "100000", "payTo": "0x2222222222222222222222222222222222222222" },
+    "quota_key": "resource + scheme + network + asset — IDENTICAL across both sets (vector isolation: only payTo/amount vary)",
+    "concurrency": "the client driver launches both attempts via Promise.allSettled (NOT Promise.all — a partial failure must not lose the second attempt's data); the stand's HTTP server serves concurrent contacts in arrival order; the divergence is guaranteed by composition",
+    "fresh_client": "a NEW client instance per iteration and per control (recipientLedger empty; no preceding 402 cycle on the key) — otherwise the binding poisons the controls"
+  },
+  "verdict_rule": {
+    "fail": "signerCalls >= 2 at divergent payTo — both payloads signed before the binding was recorded (state-init TOCTOU); recorded as candidate-fix boundary",
+    "pass": "signerCalls <= 1 AND the unaccepted attempt rejected pre-signer with a typed error AND controls 1–2 green",
+    "color": "SUT-perspective: a fired probe = the SUT FAILED; PASS = the SUT held. The verdict color is counted in the coordinate system of the code under test (vs 2b4cc47 the expected result is FAIL — a diagnosis of the code, not a stand defect)"
+  },
+  "controls": {
+    "control_1": "sequential pair, same composition, FRESH client: exactly 1 signer call; attempt 2 rejected BEFORE the signer (QuoteMismatchError; explicit: field=payTo, source=quote-ledger/caller-config; first-accepted: field=amount). A red control-1 is a FAIL (the binding does not protect even WITHOUT the race)",
+    "control_2": "two parallel IDENTICAL attempts payToA/amountA (identical rig): 2 signed payloads (no false positive; divergence only in nonce/dates is not a substitution). A red control-2 is ADVISORY (over-broad protection: money safe, legitimate parallel flow broken)"
+  },
+  "source_run_observation": {
+    "commit": "2b4cc47",
+    "result": "FAIL in both modes: A10a — 2 signer calls, the foreign payTo payload signed; A10b — 2 calls; sequential references — 1 call. Red zone = diagnosis of the code, NOT a stand defect",
+    "stand_pitfalls": [
+      "the offer builder may have its OWN default payTo — set payTo DETERMINISTICALLY on every offer, otherwise the rig catches itself (the lab had 3 false firings on the first run)",
+      "parallel = Promise.allSettled, not Promise.all",
+      "read the signer counter only after BOTH attempts settle",
+      "a fresh client per iteration and per control"
+    ]
+  },
+  "parameterization_wave2": [
+    "N parallel attempts (2..10)",
+    "second-attempt start delay 0/10/50 ms (window map)",
+    "vector combinations: payTo-only / amount-only / both"
+  ],
+  "reproduce": {
+    "stand_cmd": "argus run --block B --family BS --scenario S-BS-14 --bind 0.0.0.0:4416 --skip-gate --json  # defaults serve the explicit divergence; first-accepted via runner knob bindingRace:{variant:'first-accepted'}",
+    "client_cmd": "instrumented SUT driver with a signer counter, typed pre-signer rejections (field/source) and controls 1–2 on fresh clients — reference logic: src/tests/blockb/SBS14_SBS15_Extension.test.ts (InstrumentedSutClient); the evaluator reports HARNESS_ERROR without the client oracle by design (evidence discipline)",
+    "amounts_note": "atomic units, USDC 6 decimals: 10000 = $0.01, 100000 = $0.10"
+  },
+  "versions": {
+    "note": "pinned per the tested-version canon",
+    "packages": {
+      "@x402/core": "2.28.0 (baseline stand; SUT = client with spendControls enabled)",
+      "@x402/evm": "2.28.0",
+      "@x402/fetch": "2.28.0"
+    },
+    "lab_rig": "x402-foundation/x402 PR #3920 @ 2b4cc47 (probes A10a/A10b executed 2026-10-25)",
+    "network": "Base Sepolia (eip155:84532), USDC 0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "test_lab": {
+      "repo": "github.com/igor-vii/Argus-Agent-Test-Lab",
+      "registry_wave": "2.5 (registry 31 → 33)",
+      "evaluators": "src/blockb/BlockBRegistry.ts (evaluateBsSession: binding-race)",
+      "runner": "src/blockb/runners/BsRunner.ts (binding-race script + parallelAttempts helper)"
+    },
+    "first_run": {
+      "kind": "mock-stand reproduction (instrumented SUT, vitest)",
+      "result": "vulnerable client → FAIL (2 signer calls, payTo A+B signed); fixed client (binding before the second attempt) → PASS with controls 1–2 green",
+      "artifact": "src/tests/blockb/SBS14_SBS15_Extension.test.ts"
+    }
+  },
+  "sessions": []
+}

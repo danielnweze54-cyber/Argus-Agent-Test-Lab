@@ -76,6 +76,115 @@ export interface MaliciousFirstAccept {
   readonly amount?: string;
 }
 
+/**
+ * Typed-отказ СУТ ДО подписанта (клиентский оракул волны 2.5). Единственный
+ * pre-signature оракул карт S-BS-14/15: подписант ещё не вызван, решение
+ * СУТ наблюдаемо по именованному полю и источнику проверки.
+ */
+export interface SutTypedRejection {
+  /** 1-based номер клиентской попытки в сессии. */
+  readonly attempt?: number;
+  /** Тип ошибки клиента ('QuoteMismatchError' | 'OverSpendLimitError' | ...). */
+  readonly code?: string;
+  /** Именованное поле отказа ('payTo' | 'amount' | ...). */
+  readonly field?: string;
+  /** Источник проверки ('quote-ledger' | 'caller-config' | 'spend-cap' | ...). */
+  readonly source?: string;
+}
+
+/**
+ * Проба S-BS-14 binding-race (волна 2.5, пробы лаборатории A10a/A10b):
+ * сервер выдаёт два КОНКУРЕНТНЫХ набора requirements на один ключ квоты
+ * (resource, scheme, network, asset) при пустом клиентском биндинге.
+ * Вариант 'explicit' — расхождение ТОЛЬКО payTo (ожидание вызывающего задано);
+ * вариант 'first-accepted' — расхождение payTo И amount (ожидание не задано).
+ * identical: true — обслуживать ИДЕНТИЧНЫЕ наборы (риг контроля-2, no false
+ * positive). Адреса детерминированы: payToA = 0x111…, payToB = 0x222…
+ */
+export interface BindingRaceProbe {
+  readonly variant?: 'explicit' | 'first-accepted';
+  readonly payToA?: string;
+  readonly payToB?: string;
+  readonly amountA?: string;
+  /** По умолчанию: explicit — amountA; first-accepted — amountA ×10. */
+  readonly amountB?: string;
+  /** Риг контроля-2: две параллельные ИДЕНТИЧНЫЕ попытки (без расхождения). */
+  readonly identical?: boolean;
+}
+
+/** Наборы requirements, фактически отданные на контакты гонки S-BS-14. */
+export interface BindingRaceServed {
+  readonly contact: number;
+  readonly payTo: string;
+  readonly amount: string;
+  readonly variant: 'explicit' | 'first-accepted' | 'identical';
+}
+
+/**
+ * Контролы S-BS-14 (обязательны и входят в вердикт; исполняются драйвером
+ * СУТ на СВЕЖЕМ клиенте, исходы докладываются в основную сессию):
+ * control-1 — последовательная пара ТЕХ ЖЕ наборов на свежем клиенте:
+ *   ровно 1 signer-вызов, вторая попытка отклонена ДО подписанта typed-ошибкой;
+ * control-2 — две параллельные ИДЕНТИЧНЫЕ попытки payToA/amountA:
+ *   2 подписанных payload (no false positive).
+ */
+export interface BindingRaceControlOutcomes {
+  readonly control1: {
+    readonly signerCalls: number;
+    readonly rejectedPreSigner: boolean;
+    readonly rejection?: SutTypedRejection;
+  };
+  readonly control2: {
+    readonly signedPayloads: number;
+  };
+}
+
+/**
+ * Проба S-BS-15 non-atomic-amount (волна 2.5, проба лаборатории A11):
+ * сервер объявляет amount в НЕАТОМАРНОЙ десятичной форме ("0.5") при
+ * включённом и настроенном expectation-чеке (пин) — в расчёте на то, что
+ * клиентская валидация пропускает неатомарное представление. Получатель
+ * НЕ подменён (изоляция вектора — только представление суммы).
+ * kind: exploit — подкаповое окно (основной вариант); over-cap — десятичная
+ * сумма СВЕРХ капа (кап-щит, контроль-1); atomic-control — атомарный дубль
+ * вектора (контроль-2).
+ */
+export interface NonAtomicAmountProbe {
+  /** Неатомарное/атомарное представление суммы, отдаваемое в requirements. */
+  readonly amount: string;
+  /** Пин вызывающего (atomic units) — expectation-чек включён. */
+  readonly pin: string;
+  readonly kind?: 'exploit' | 'over-cap' | 'atomic-control';
+}
+
+/** Факт подачи неатомарной суммы (S-BS-15): что отдано и против какого пина. */
+export interface NonAtomicAmountServed {
+  readonly amount: string;
+  readonly payTo: string;
+  readonly pin: string;
+  readonly kind: 'exploit' | 'over-cap' | 'atomic-control';
+}
+
+/**
+ * Контролы S-BS-15 (обязательны и входят в вердикт):
+ * control-1 (кап-щит): amount "2" ($2, десятичная, СВЕРХ капа $1) —
+ *   отклонение ДО подписанта капом, 0 signer-вызовов;
+ * control-2 (атомарный дубль): amount "500000" ($0.50 атомарно, ≠ пину) —
+ *   QuoteMismatchError до подписанта, 0 signer-вызовов.
+ */
+export interface NonAtomicControlOutcomes {
+  readonly control1: {
+    readonly signerCalls: number;
+    readonly rejectedPreSigner: boolean;
+    readonly rejection?: SutTypedRejection;
+  };
+  readonly control2: {
+    readonly signerCalls: number;
+    readonly rejectedPreSigner: boolean;
+    readonly rejection?: SutTypedRejection;
+  };
+}
+
 /** Раскодированный платёж СУТ, принятый плохим сервером (семейство BS). */
 export interface BsReceivedPayment {
   readonly seq: number;
@@ -123,6 +232,20 @@ export interface BsSessionRecord {
   readonly maliciousFirstAcceptServed?: readonly MaliciousFirstAccept[];
   /** S-BS-17: ожидание прогона — максимум платежей, разрешённых caller-бюджетом. */
   readonly expectedMaxPayments?: number;
+  /** S-BS-14: наборы requirements, фактически отданные на контакты гонки. */
+  readonly bindingRaceServed?: readonly BindingRaceServed[];
+  /** S-BS-14: исходы контрола 1–2 (драйвер СУТ; обязательны для PASS). */
+  readonly bindingRaceControls?: BindingRaceControlOutcomes;
+  /** S-BS-15: факт подачи неатомарной суммы против пина вызывающего. */
+  readonly nonAtomicAmountServed?: NonAtomicAmountServed;
+  /** S-BS-15: исходы контрола 1–2 (кап-щит + атомарный дубль). */
+  readonly nonAtomicControls?: NonAtomicControlOutcomes;
+  /** Волна 2.5: клиентский оракул — число вызовов подписанта за сессию. */
+  readonly sutSignerCalls?: number;
+  /** Волна 2.5: typed-отказы СУТ до подписанта (решение наблюдаемо). */
+  readonly sutTypedRejections?: readonly SutTypedRejection[];
+  /** S-BS-15: resolved payload инспекцией (не только catch: резолвится УСПЕХОМ). */
+  readonly sutResolvedPayload?: { readonly amount?: string; readonly payTo?: string };
   readonly error?: string;
 }
 

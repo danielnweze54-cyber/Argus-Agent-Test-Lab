@@ -537,7 +537,7 @@ export async function runBlockBCommand(argv: string[]): Promise<number> {
     if (flags.action === 'list') {
       validateBlockBRegistry();
       const all = listBlockBScenarios();
-      console.log(`Block B scenarios (registered in code: ${all.length} = волна 1 × 10 + волна 2 × 18):`);
+      console.log(`Block B scenarios (registered in code: ${all.length} = волна 1 × 10 + волна 2 × 18 + волна 2.5 × 2 + волна 3 × 3):`);
       for (const spec of all) {
         console.log(
           `  ${spec.id}  ${spec.slug.padEnd(26)} family=${spec.family} phase=${spec.phase} wave=${spec.wave}  ${spec.title}`

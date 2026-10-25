@@ -66,11 +66,14 @@ export { S_BC_01_BadSignature, corruptPaymentPayload } from './examples/S_BC_01_
 
 export {
   BLOCK_B_WAVE1_SCENARIOS,
+  BLOCK_B_WAVE25_SCENARIOS,
   listBlockBScenarios,
   getBlockBScenario,
   validateBlockBRegistry,
   evaluateBcAttempt,
   evaluateBsSession,
+  decimalToAtomic,
+  USDC_DECIMALS,
   type VerdictEvaluation,
 } from './BlockBRegistry';
 
@@ -81,9 +84,23 @@ export type {
   BsSessionRecord,
   ScenarioRunResult,
   RunnerReport,
+  SutTypedRejection,
+  BindingRaceProbe,
+  BindingRaceServed,
+  BindingRaceControlOutcomes,
+  NonAtomicAmountProbe,
+  NonAtomicAmountServed,
+  NonAtomicControlOutcomes,
 } from './runners/BlockBRunnerTypes';
 export { worstVerdict, computeExitCode, assertScenarioMatchesConfig } from './runners/BlockBRunnerTypes';
 
 export { BcRunner, createBcRunner, parseRequirements, parsePaymentResponse, type PaymentSigner, type BcRunnerOptions } from './runners/BcRunner';
-export { BsRunner, decodePayment, type BsRunnerOptions } from './runners/BsRunner';
+export {
+  BsRunner,
+  decodePayment,
+  parallelAttempts,
+  BINDING_RACE_PAYTO_A,
+  BINDING_RACE_PAYTO_B,
+  type BsRunnerOptions,
+} from './runners/BsRunner';
 export { runBlockBGate, type GateOptions } from './runners/BlockBGate';
