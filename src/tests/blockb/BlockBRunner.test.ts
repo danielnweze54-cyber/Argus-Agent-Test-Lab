@@ -27,12 +27,12 @@ const PAY_TO = '0x9999999999999999999999999999999999999999';
 
 /* ------------------------------ Реестр ------------------------------ */
 
-describe('Block B registry (waves 1+2+3)', () => {
-  it('валиден, содержит 31 сценарий (10 + 18 + 3 переноса демо)', () => {
+describe('Block B registry (waves 1+2+2.5+3)', () => {
+  it('валиден, содержит 33 сценария (10 + 18 + 2 расширения A10/A11 + 3 переноса демо)', () => {
     expect(() => validateBlockBRegistry()).not.toThrow();
     const ids = listBlockBScenarios().map((s) => s.id);
-    expect(ids).toHaveLength(31);
-    expect(new Set(ids).size).toBe(31);
+    expect(ids).toHaveLength(33);
+    expect(new Set(ids).size).toBe(33);
     expect(ids).toEqual(
       expect.arrayContaining([
         'S-BC-01', 'S-BC-02', 'S-BC-04', 'S-BC-05', 'S-BC-09',

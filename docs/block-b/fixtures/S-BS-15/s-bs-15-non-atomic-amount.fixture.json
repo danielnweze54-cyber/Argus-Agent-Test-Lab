@@ -1,0 +1,71 @@
+{
+  "fixture": "S-BS-15 non-atomic-amount probe — the server announces amount in a NON-ATOMIC decimal form (\"0.5\") while the client expectation check (pin) is enabled, betting that client validation lets the non-atomic representation through",
+  "attribution": "Attribution: executed per the Argus Agent Test Lab scenario series (A10–A11 → S-BS-14/15). Any reuse or derivative MUST retain this banner.",
+  "origin": {
+    "lab_probe": "A11 (non-atomic amount bypassing the pin)",
+    "lab_run": "2026-10-25, lab reference rig test/lab/matrix-a10a11.extension.test.ts (TS/vitest)",
+    "upstream": "x402-foundation/x402 PR #3920 @ commit 2b4cc47 (fix = client-side spend-controls)",
+    "registry_home": "S-BS-15; A-number remains the external probe name, S-BS-ID is the permanent registry home",
+    "related": [
+      "x402-foundation/x402#3866 (S-BS-06 oversize-amount — neighboring axis: ATOMIC form, inflated value)",
+      "S-BS-06 H1: the cap is a ceiling, not a price expectation — the exploit window is UNDER the cap",
+      "unprobed candidates of the same class: S-BS-15b/c — exponential \"1e6\", hex, v1 maxAmountRequired path"
+    ],
+    "placement": "Block B, family S-BS (SUT = client protecting its own money; Argus = mock resource server). Phase 1: probes fire before signature; facilitator not needed. The payee is NOT substituted (vector isolation — only the amount representation varies; otherwise the neighboring S-BS-05/14 check fires and smears the verdict)."
+  },
+  "evidence_discipline": {
+    "established": "the client SIGNED a payload whose decimal equivalent differs from the enabled pin (in the source run: $0.50 at pin $0.01 — 50×, under the default $1 cap); dual oracle: signer-call counter + inspection of the resolved payload (payload.amount), NOT a catch-pattern",
+    "not_established": "an ON-CHAIN transfer: settlement in this harness is mocked, the client wallet is an unfunded one-shot test key; with a compliant facilitator the captured authorization would settle on-chain as-is",
+    "redaction": "no private keys, no signatures, no usable authorizations; nonce values are random per envelope and truncated in reports"
+  },
+  "fault_injection": {
+    "requirements": { "amount": "0.5", "payTo": "0x9999999999999999999999999999999999999999 (canonical — NOT varied)" },
+    "pin": "10000 atomic ($0.01 at 6-dec USDC) — the caller expectation check is ENABLED and configured",
+    "amount_resolution_canon": "integer string = ATOMIC form (protocol canon: \"10000\" = $0.01, \"500000\" = $0.50); fractional string = NON-ATOMIC decimal representation → scale 10^decimals (\"0.5\" → 500000 = $0.50; \"2.0\" → 2000000 = $2; \"100000.5\" → 100000500000); comparison ALWAYS by decimal equivalent, never by string — \"0.5\" and \"500000\" are one vector in two representations",
+    "trap": "the naive 'amount over the cap' variant (\"100000.5\") IS CAUGHT BY THE CAP and looks 'safe' — a false negative. The exploit window is only UNDER the cap. The triple of variants is mandatory: sub-cap decimal (exploit) / over-cap decimal (shield, \"2.0\" = $2) / atomic duplicate (check, \"500000\" = $0.50)"
+  },
+  "verdict_rule": {
+    "fail": "a payload signed whose decimal equivalent differs from the pin while the expectation check is enabled and the representation is non-atomic (source run: ×50 under the default cap)",
+    "pass": "rejection BEFORE the signer (0 signer calls) with a typed error AND controls 1–2 green",
+    "color": "SUT-perspective: a fired probe = the SUT FAILED; PASS = the SUT held (vs 2b4cc47 the expected result is FAIL — a diagnosis of the code, not a stand defect)"
+  },
+  "controls": {
+    "control_1_cap_shield": "amount \"2.0\" (decimal $2, OVER the $1 cap) → rejection BEFORE the signer by the cap (0 calls; OverSpendLimitError, source=spend-cap). Proves the cap is engaged and was a brake at all. A red control-1 is a FAIL (an over-cap decimal reached the signer)",
+    "control_2_atomic_duplicate": "amount \"500000\" ($0.50 ATOMIC — the atomic duplicate of the exploit vector) → QuoteMismatchError pre-signer (0 calls). Proves the expectation check is enabled and works on atomic values. A red control-2 is a FAIL (an atomic amount different from the pin was signed)"
+  },
+  "oracle_pitfall": "createPaymentPayload RESOLVES SUCCESSFULLY with a payload — the assertion MUST inspect payload.amount, not only catch exceptions: the catch-pattern twice produced a false PASS in the lab",
+  "source_run_observation": {
+    "commit": "2b4cc47",
+    "result": "FAIL — \"0.5\" signed on the default configuration (50× the pin, under the default cap); \"500000\" rejected; \"2\" rejected by the cap (shield); with cap=false \"100000.5\" signed. Red zone = diagnosis of the code, NOT a stand defect"
+  },
+  "parameterization_future": [
+    "exponential form \"1e6\", hex form, v1 maxAmountRequired path — the same class (non-atomic representation bypassing the check); candidate cards S-BS-15b/c (unprobed, marked in the registry)"
+  ],
+  "reproduce": {
+    "stand_cmd": "argus run --block B --family BS --scenario S-BS-15 --bind 0.0.0.0:4417 --skip-gate --json  # defaults: amount \"0.5\", pin = resource price; control rigs via runner knob nonAtomicAmount:{amount,kind}",
+    "client_cmd": "instrumented SUT driver with a signer counter, typed pre-signer rejections (field/source), resolved-payload inspection and controls 1–2 on fresh clients — reference logic: src/tests/blockb/SBS14_SBS15_Extension.test.ts (InstrumentedSutClient); the evaluator reports HARNESS_ERROR without the client oracle by design (evidence discipline)",
+    "amounts_note": "atomic units, USDC 6 decimals: 10000 = $0.01, 500000 = $0.50, 2.0 (decimal) = $2"
+  },
+  "versions": {
+    "note": "pinned per the tested-version canon",
+    "packages": {
+      "@x402/core": "2.28.0 (baseline stand; SUT = client with spendControls enabled, default maxAmountPerPayment $1)",
+      "@x402/evm": "2.28.0",
+      "@x402/fetch": "2.28.0"
+    },
+    "lab_rig": "x402-foundation/x402 PR #3920 @ 2b4cc47 (probe A11 executed 2026-10-25)",
+    "network": "Base Sepolia (eip155:84532), USDC 0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "test_lab": {
+      "repo": "github.com/igor-vii/Argus-Agent-Test-Lab",
+      "registry_wave": "2.5 (registry 31 → 33)",
+      "evaluators": "src/blockb/BlockBRegistry.ts (evaluateBsSession: non-atomic-amount; decimalToAtomic canon)",
+      "runner": "src/blockb/runners/BsRunner.ts (non-atomic-amount script)"
+    },
+    "first_run": {
+      "kind": "mock-stand reproduction (instrumented SUT, vitest)",
+      "result": "vulnerable client → FAIL (\"0.5\" signed under the default cap, 50× the pin; variant-2 without cap → \"100000.5\" signed); fixed client (pin + cap, decimal-equivalent comparison) → PASS with controls 1–2 green",
+      "artifact": "src/tests/blockb/SBS14_SBS15_Extension.test.ts"
+    }
+  },
+  "sessions": []
+}
