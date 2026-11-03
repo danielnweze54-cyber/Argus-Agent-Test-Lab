@@ -82,10 +82,78 @@
 
 <section id="scenarios" class="page"><div class="page-head compact"><div><div class="eyebrow">SCENARIOS</div><h1>Controlled failure modes</h1><p>Small, composable scenarios for testing behavior under pressure.</p></div></div><div class="scenario-grid"><div class="scenario-card"><div class="scenario-num">S01</div><h2>Honest</h2><p>Baseline participant behavior</p><button class="secondary" data-scenario="Honest">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S02</div><h2>Impatient</h2><p>Early retry pressure</p><button class="secondary" data-scenario="Impatient">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S03</div><h2>Duplicate</h2><p>Repeated request</p><button class="secondary" data-scenario="Duplicate">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S04</div><h2>Adversarial</h2><p>Hostile participant behavior</p><button class="secondary" data-scenario="Adversarial">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S05</div><h2>Slow</h2><p>Delayed seller</p><button class="secondary" data-scenario="Slow">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S06</div><h2>Broken</h2><p>Broken target</p><button class="secondary" data-scenario="Broken">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S07</div><h2>Delivery Loss</h2><p>Response delivery disappears</p><button class="secondary" data-scenario="Delivery Loss">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S08</div><h2>Crash</h2><p>Target crashes after settlement</p><button class="secondary" data-scenario="Crash">Use scenario →</button></div></div></section>
 
-<section id="evidence" class="page"><div class="page-head compact"><div><div class="eyebrow">EVIDENCE</div><h1>Observable event stream</h1><p>Evidence is collected from the target boundary — not from hidden internals.</p></div></div><div class="panel evidence-panel"><div class="filterbar"><select><option>Test: T-024</option><option>T-023</option></select><select><option>All sources</option><option>HTTP</option><option>Payment</option><option>Receipt</option></select><button class="secondary">Export view</button></div><div class="evidence-row"><span class="mono">00:00.184</span><span class="source">EXTERNAL</span><b>REQUEST_SENT</b><span class="payload">payload preview …</span><button class="icon-btn">›</button></div><div class="evidence-row"><span class="mono">00:01.321</span><span class="source">EXTERNAL</span><b>PAYMENT_SETTLED</b><span class="payload">payload preview …</span><button class="icon-btn">›</button></div><div class="evidence-row"><span class="mono">00:02.458</span><span class="source">EXTERNAL</span><b>SELLER_RESPONSE</b><span class="payload">payload preview …</span><button class="icon-btn">›</button></div><div class="evidence-row"><span class="mono">00:03.595</span><span class="source">EXTERNAL</span><b>DELIVERY_UNKNOWN</b><span class="payload">payload preview …</span><button class="icon-btn">›</button></div><div class="evidence-row"><span class="mono">00:04.732</span><span class="source">EXTERNAL</span><b>ASSERTION_EVALUATED</b><span class="payload">payload preview …</span><button class="icon-btn">›</button></div></div></section>
+<section id="evidence" class="page">
+  <div class="page-head compact">
+    <div>
+      <div class="eyebrow">EVIDENCE</div>
+      <h1>Observable event stream</h1>
+      <p>Evidence is collected from the target boundary — not from hidden internals.</p>
+    </div>
+  </div>
+
+  <div class="panel evidence-panel">
+    <div class="evidence-explainer">
+      <strong>How to interpret this evidence</strong>
+      <p>SELLER_RESPONSE confirms that the seller responded. It does not prove that the buyer received or verified the work. DELIVERY_UNKNOWN can therefore remain true even when a seller response is present.</p>
+    </div>
+
+    <div class="filterbar">
+      <select>
+        <option>Test: T-024</option>
+        <option>T-023</option>
+      </select>
+      <select>
+        <option>All sources</option>
+        <option>HTTP</option>
+        <option>Payment</option>
+        <option>Receipt</option>
+      </select>
+      <button class="secondary">Export view</button>
+    </div>
+
+    <div class="evidence-row">
+      <span class="mono">00:00.184</span>
+      <span class="source">EXTERNAL</span>
+      <b>REQUEST_SENT</b>
+      <span class="payload">payload preview …</span>
+      <button class="icon-btn">›</button>
+    </div>
+
+    <div class="evidence-row">
+      <span class="mono">00:01.321</span>
+      <span class="source">EXTERNAL</span>
+      <b>PAYMENT_SETTLED</b>
+      <span class="payload">payload preview …</span>
+      <button class="icon-btn">›</button>
+    </div>
+
+    <div class="evidence-row">
+      <span class="mono">00:02.458</span>
+      <span class="source">EXTERNAL</span>
+      <b>SELLER_RESPONSE</b>
+      <span class="payload">payload preview …</span>
+      <button class="icon-btn">›</button>
+    </div>
+
+    <div class="evidence-row">
+      <span class="mono">00:03.595</span>
+      <span class="source">EXTERNAL</span>
+      <b>DELIVERY_UNKNOWN</b>
+      <span class="payload">payload preview …</span>
+      <button class="icon-btn">›</button>
+    </div>
+
+    <div class="evidence-row">
+      <span class="mono">00:04.732</span>
+      <span class="source">EXTERNAL</span>
+      <b>ASSERTION_EVALUATED</b>
+      <span class="payload">payload preview …</span>
+      <button class="icon-btn">›</button>
+    </div>
+  </div>
+</section>
 
 <section id="reports" class="page"><div class="page-head compact"><div><div class="eyebrow">REPORTS</div><h1>Evidence-backed reports</h1><p>A compact record of what was tested, observed, and proven.</p></div><button class="secondary">Generate report</button></div><div class="report panel"><div class="report-top"><div><span class="label">TEST REPORT</span><h2>T-024 / Secretariat / Lost Delivery</h2></div><span class="badge unresolved">UNRESOLVED</span></div><div class="report-grid"><div><span>AGENT</span><b>argus-buyer-01</b></div><div><span>TARGET</span><b>Secretariat</b></div><div><span>ASSERTIONS</span><b>4 evaluated</b></div><div><span>EVIDENCE</span><b>12 events</b></div></div><div class="report-note"><b>Resolution</b><p>Delivery outcome remains unproven. The report preserves the distinction between missing observation and proven failure.</p></div></div></section>
-
 <section id="settings" class="page"><div class="page-head compact"><div><div class="eyebrow">SETTINGS</div><h1>Control room preferences</h1><p>Presentation settings are local to this prototype.</p></div></div><div class="settings-list panel"><label>Default target <select><option>Secretariat</option><option>Custom HTTP target</option></select></label><label>Evidence verbosity <select><option>Detailed</option><option>Standard</option><option>Minimal</option></select></label><label>Theme <button id="themeSetting" class="secondary">Toggle light / dark</button></label></div></section>
 
 <section id="result" class="page">
@@ -107,7 +175,7 @@
     <div class="panel result-status">
       <span class="label">EXECUTION STATE</span>
       <strong class="result-complete">COMPLETE</strong>
-      <small>The test evaluation finished.</small>
+      <small>The test run finished. This does not mean the requested delivery succeeded.</small>
     </div>
     <div class="panel result-status">
       <span class="label">VERDICT</span>
@@ -136,16 +204,16 @@
         <p>The buyer should receive the requested result, supported by verifiable delivery evidence.</p>
       </article>
 
-      <article class="result-evidence observed">
+            <article class="result-evidence observed">
         <span class="result-step">02 / OBSERVED</span>
-        <h3>Payment-related evidence</h3>
-        <p>The illustrative scenario includes payment settlement evidence. Settlement alone does not establish that the work was delivered.</p>
+        <h3>Payment and seller response</h3>
+        <p>The illustrative evidence includes payment settlement and a seller response. A seller response confirms that the seller responded, but does not independently prove that the buyer received or verified the requested work.</p>
       </article>
 
       <article class="result-evidence missing">
-        <span class="result-step">03 / MISSING</span>
-        <h3>Delivery confirmation</h3>
-        <p>No verifiable delivery evidence is available in this result to confirm that the buyer received the requested work.</p>
+        <span class="result-step">03 / STILL UNVERIFIED</span>
+        <h3>Buyer-side delivery confirmation</h3>
+        <p>Despite the observed seller response, no verifiable evidence confirms that the buyer received and verified the requested work. DELIVERY_UNKNOWN therefore remains unresolved.</p>
       </article>
     </div>
   </div>
@@ -173,7 +241,7 @@
     <div class="result-conclusion">
       <span class="label">FINAL REASONING</span>
       <h3>UNRESOLVED / DELIVERY_UNKNOWN</h3>
-      <p>The execution completed, but delivery remains unverified. More evidence is needed to determine the delivery outcome. Missing evidence alone is not proof of failure.</p>
+      <p>The test run completed and the seller response was observed, but successful delivery to the buyer remains unverified. A seller response is not proof of receipt. More evidence is needed to determine the delivery outcome; missing evidence alone is not proof of failure.</p>
     </div>
 
     <button class="secondary full" data-page="evidence">Inspect evidence stream →</button>
