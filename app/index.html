@@ -50,7 +50,7 @@
       <div class="timeline">
         <div class="event done"><span class="event-time">00:00.184</span><span class="event-line"></span><div><b>REQUEST_SENT</b><small>External request accepted</small></div></div>
         <div class="event done"><span class="event-time">00:00.421</span><span class="event-line"></span><div><b>PAYMENT_SETTLED</b><small>Observable settlement evidence</small></div></div>
-        <div class="event pending"><span class="event-time">00:01.208</span><span class="event-line"></span><div><b>DELIVERY_UNKNOWN</b><small>Seller response not observed</small></div></div>
+        <div class="event done"><span class="event-time">00:02.458</span><span class="event-line"></span><div><b>SELLER_RESPONSE</b><small>Seller response observed; delivery receipt not verified</small></div></div>
       </div>
       <div class="fault-row"><span class="label">FAULTS</span><button class="chip selected">Delivery Loss</button><button class="chip">Duplicate</button><button class="chip">Timeout</button></div>
     </div>
@@ -77,7 +77,7 @@
 </section>
 
 <section id="tests" class="page"><div class="page-head compact"><div><div class="eyebrow">TESTS</div><h1>Execution history</h1><p>Every run is a durable test record with observable evidence.</p></div><button id="runTest2" class="primary">Run a test →</button></div><div class="panel table-wrap"><table><thead><tr><th>TEST ID</th><th>AGENT</th><th>SCENARIO</th><th>TARGET</th><th>STATUS</th><th>VERDICT</th></tr></thead><tbody>
-<tr><td class="mono">T-024</td><td>argus-buyer-01</td><td>Lost Delivery</td><td>Secretariat</td><td>COMPLETE</td><td class="amber">UNRESOLVED</td></tr><tr><td class="mono">T-023</td><td>argus-buyer-01</td><td>Crash After Settlement</td><td>Secretariat</td><td>COMPLETE</td><td class="green">PROVEN_SUCCESS</td></tr><tr><td class="mono">T-022</td><td>argus-buyer-01</td><td>Duplicate Request</td><td>Secretariat</td><td>COMPLETE</td><td class="red">PROVEN_FAILURE</td></tr><tr><td class="mono">T-021</td><td>argus-buyer-01</td><td>Payment Retry</td><td>Secretariat</td><td>COMPLETE</td><td class="green">PROVEN_SUCCESS</td></tr>
+<tr data-detail="T-024" tabindex="0" role="button" aria-label="Open Lost Delivery result"><td class="mono">T-024</td><td>argus-buyer-01</td><td>Lost Delivery</td><td>Secretariat</td><td>COMPLETE</td><td class="amber">UNRESOLVED</td></tr><tr><td class="mono">T-023</td><td>argus-buyer-01</td><td>Crash After Settlement</td><td>Secretariat</td><td>COMPLETE</td><td class="green">PROVEN_SUCCESS</td></tr><tr><td class="mono">T-022</td><td>argus-buyer-01</td><td>Duplicate Request</td><td>Secretariat</td><td>COMPLETE</td><td class="red">PROVEN_FAILURE</td></tr><tr><td class="mono">T-021</td><td>argus-buyer-01</td><td>Payment Retry</td><td>Secretariat</td><td>COMPLETE</td><td class="green">PROVEN_SUCCESS</td></tr>
 </tbody></table></div></section>
 
 <section id="scenarios" class="page"><div class="page-head compact"><div><div class="eyebrow">SCENARIOS</div><h1>Controlled failure modes</h1><p>Small, composable scenarios for testing behavior under pressure.</p></div></div><div class="scenario-grid"><div class="scenario-card"><div class="scenario-num">S01</div><h2>Honest</h2><p>Baseline participant behavior</p><button class="secondary" data-scenario="Honest">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S02</div><h2>Impatient</h2><p>Early retry pressure</p><button class="secondary" data-scenario="Impatient">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S03</div><h2>Duplicate</h2><p>Repeated request</p><button class="secondary" data-scenario="Duplicate">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S04</div><h2>Adversarial</h2><p>Hostile participant behavior</p><button class="secondary" data-scenario="Adversarial">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S05</div><h2>Slow</h2><p>Delayed seller</p><button class="secondary" data-scenario="Slow">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S06</div><h2>Broken</h2><p>Broken target</p><button class="secondary" data-scenario="Broken">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S07</div><h2>Delivery Loss</h2><p>Response delivery disappears</p><button class="secondary" data-scenario="Delivery Loss">Use scenario →</button></div><div class="scenario-card"><div class="scenario-num">S08</div><h2>Crash</h2><p>Target crashes after settlement</p><button class="secondary" data-scenario="Crash">Use scenario →</button></div></div></section>
@@ -136,11 +136,11 @@
     </div>
 
     <div class="evidence-row">
-      <span class="mono">00:03.595</span>
-      <span class="source">EXTERNAL</span>
-      <b>DELIVERY_UNKNOWN</b>
-      <span class="payload">payload preview …</span>
-      <button class="icon-btn">›</button>
+  <span class="mono">00:03.595</span>
+  <span class="source">DERIVED</span>
+  <b>DELIVERY_UNKNOWN</b>
+  <span class="payload">Analytical classification based on available evidence</span>
+  <button class="icon-btn">›</button>
     </div>
 
     <div class="evidence-row">
